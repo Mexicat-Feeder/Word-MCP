@@ -2695,12 +2695,18 @@ async def word_live_close_document(
                 "message": f"Closed '{name}' (save_changes={save_changes})",
             }, ensure_ascii=False)
 
-        # Re-fetch document to avoid stale COM reference
-        doc = find_document(app, filename)
-        if doc is None:
+        # Re-fetch doc from app.Documents to get a fresh COM reference
+        fresh_doc = None
+        target_name = filename.lower() if filename else None
+        for i in range(1, app.Documents.Count + 1):
+            d = app.Documents(i)
+            if target_name and d.Name.lower() == target_name:
+                fresh_doc = d
+                break
+        if not fresh_doc:
             return json.dumps({"error": f"Document '{filename}' not found in open documents"})
-        name = doc.Name
-        doc.Close(save_flag)
+        name = fresh_doc.Name
+        fresh_doc.Close(save_flag)
         # If no documents left, quit Word gracefully
         if app.Documents.Count == 0:
             app.Quit()
