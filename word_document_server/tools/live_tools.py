@@ -2524,7 +2524,7 @@ async def word_live_open_document(
     directory: str = ".",
     visible: bool = True,
     read_only: bool = False,
-    password: str = None,
+    password: str | None = None,
 ) -> str:
     """[Windows/macOS] Open a Word document so live tools can operate on it.
 

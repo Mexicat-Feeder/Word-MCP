@@ -1141,7 +1141,7 @@ def mac_open_document(
     directory: str = ".",
     visible: bool = True,
     read_only: bool = False,
-    password: str = None,
+    password: str | None = None,
 ) -> str:
     """Open a Word document on macOS via JXA.
 

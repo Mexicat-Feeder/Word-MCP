@@ -1759,7 +1759,7 @@ def register_tools():
         directory: str = ".",
         visible: bool = True,
         read_only: bool = False,
-        password: str = None,
+        password: str | None = None,
     ):
         """[Windows/macOS] Open a Word document so live tools can operate on it. Requires Word running."""
         return live_tools.word_live_open_document(
@@ -1958,7 +1958,7 @@ def register_tools():
             readOnlyHint=True,
         ),
     )
-    def verify_document(filename: str, password: str = None):
+    def verify_document(filename: str, password: str | None = None):
         """Verify document protection and/or digital signature."""
         return protection_tools.verify_document(filename, password)
 
