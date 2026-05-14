@@ -2682,6 +2682,8 @@ async def word_live_close_document(
             if app.Documents.Count == 0:
                 return json.dumps({"error": "No documents are open in Word"})
             doc = app.ActiveDocument
+            if doc is None:
+                return json.dumps({"error": "No active document found"})
             name = doc.Name
             doc.Close(save_flag)
             # If no documents left, quit Word gracefully
@@ -2693,7 +2695,10 @@ async def word_live_close_document(
                 "message": f"Closed '{name}' (save_changes={save_changes})",
             }, ensure_ascii=False)
 
+        # Re-fetch document to avoid stale COM reference
         doc = find_document(app, filename)
+        if doc is None:
+            return json.dumps({"error": f"Document '{filename}' not found in open documents"})
         name = doc.Name
         doc.Close(save_flag)
         # If no documents left, quit Word gracefully
