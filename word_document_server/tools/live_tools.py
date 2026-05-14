@@ -2684,71 +2684,9 @@ async def word_live_close_document(
             doc = app.ActiveDocument
             name = doc.Name
             doc.Close(save_flag)
-            return json.dumps({
-                "success": True,
-                "closed_document": name,
-                "message": f"Closed '{name}' (save_changes={save_changes})",
-            }, ensure_ascii=False)
-
-        doc = find_document(app, filename)
-        name = doc.Name
-        doc.Close(save_flag)
-        return json.dumps({
-            "success": True,
-            "closed_document": name,
-            "message": f"Closed '{name}' (save_changes={save_changes})",
-        }, ensure_ascii=False)
-
-    except Exception as e:
-        return json.dumps({"error": str(e)})
-
-async def word_live_close_document(
-    filename: str = None,
-    save_changes: str = "prompt",
-) -> str:
-    """[Windows/macOS] Close a document that is currently open in Word.
-
-    Args:
-        filename: Document name or path (None = active document).
-        save_changes: How to handle unsaved changes:
-            - "save"   : Save before closing
-            - "don't"  : Discard changes
-            - "prompt" : Ask the user (default, Word's normal behavior)
-
-    Returns:
-        JSON with success status and document name.
-    """
-    if _MAC_AVAILABLE:
-        return mac_close_document(filename=filename, save_changes=save_changes)
-
-    if sys.platform != "win32":
-        return json.dumps({"error": "Live editing is only available on Windows"})
-
-    try:
-        from word_document_server.core.word_com import get_word_app, find_document
-
-        app = get_word_app()
-
-        # Map save_changes string to Word constant
-        wdDoNotSaveChanges = 0
-        wdPromptToSaveChanges = -1
-        wdSaveChanges = 1
-
-        save_map = {
-            "save": wdSaveChanges,
-            "dont": wdDoNotSaveChanges,
-            "discard": wdDoNotSaveChanges,
-            "prompt": wdPromptToSaveChanges,
-        }
-        save_flag = save_map.get(save_changes.lower(), wdPromptToSaveChanges)
-
-        # If no filename, close the active document
-        if not filename:
+            # If no documents left, quit Word gracefully
             if app.Documents.Count == 0:
-                return json.dumps({"error": "No documents are open in Word"})
-            doc = app.ActiveDocument
-            name = doc.Name
-            doc.Close(save_flag)
+                app.Quit()
             return json.dumps({
                 "success": True,
                 "closed_document": name,
@@ -2758,6 +2696,9 @@ async def word_live_close_document(
         doc = find_document(app, filename)
         name = doc.Name
         doc.Close(save_flag)
+        # If no documents left, quit Word gracefully
+        if app.Documents.Count == 0:
+            app.Quit()
         return json.dumps({
             "success": True,
             "closed_document": name,
@@ -2766,3 +2707,4 @@ async def word_live_close_document(
 
     except Exception as e:
         return json.dumps({"error": str(e)})
+
