@@ -1773,7 +1773,7 @@ def register_tools():
     )
     def word_live_close_document(
         filename: str = None,
-        save_changes: str = "prompt",
+        save_changes: str = "save",
     ):
         """[Windows/macOS] Close a document that is currently open in Word. Requires Word running."""
         return live_tools.word_live_close_document(

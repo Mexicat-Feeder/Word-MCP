@@ -1220,7 +1220,7 @@ try {{
 
 def mac_close_document(
     filename: str = None,
-    save_changes: str = "prompt",
+    save_changes: str = "save",
 ) -> str:
     """Close a document on macOS via JXA."""
     save_map = {
@@ -1280,7 +1280,7 @@ if (!doc) {{
 
 def mac_close_document(
     filename: str = None,
-    save_changes: str = "prompt",
+    save_changes: str = "save",
 ) -> str:
     """Close a document on macOS via JXA."""
     # Map save_changes to JXA boolean

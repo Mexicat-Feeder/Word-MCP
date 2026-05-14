@@ -2639,7 +2639,7 @@ async def word_live_open_document(
 
 async def word_live_close_document(
     filename: str = None,
-    save_changes: str = "prompt",
+    save_changes: str = "save",
 ) -> str:
     """[Windows/macOS] Close a document that is currently open in Word.
 
@@ -2648,7 +2648,7 @@ async def word_live_close_document(
         save_changes: How to handle unsaved changes:
             - "save"   : Save before closing
             - "don't"  : Discard changes
-            - "prompt" : Ask the user (default, Word's normal behavior)
+            - "prompt" : Ask the user
 
     Returns:
         JSON with success status and document name.
