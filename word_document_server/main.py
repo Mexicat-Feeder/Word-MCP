@@ -1746,6 +1746,39 @@ def register_tools():
             filename, text, font_size, font_color, rotation, section_index,
         )
 
+    # --- Open / Close document (live) ---
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word Live Open Document",
+        ),
+    )
+    def word_live_open_document(
+        filepath: str = None,
+        visible: bool = True,
+        read_only: bool = False,
+        password: str = None,
+    ):
+        """[Windows/macOS] Open a Word document so live tools can operate on it. Requires Word running."""
+        return live_tools.word_live_open_document(
+            filepath, visible, read_only, password,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word Live Close Document",
+            destructiveHint=True,
+        ),
+    )
+    def word_live_close_document(
+        filename: str = None,
+        save_changes: str = "prompt",
+    ):
+        """[Windows/macOS] Close a document that is currently open in Word. Requires Word running."""
+        return live_tools.word_live_close_document(
+            filename, save_changes,
+        )
+
     # --- Layout, header/footer, spacing, bookmark, watermark tools ---
 
     @mcp.tool(

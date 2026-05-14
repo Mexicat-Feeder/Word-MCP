@@ -1128,3 +1128,130 @@ app.activate();
         size = os.path.getsize(output_path)
         return json.dumps({"captured": True, "path": output_path, "size": size})
     return json.dumps({"error": "Screen capture failed"})
+
+
+# ---------------------------------------------------------------------------
+# Open / Close document (macOS / JXA)
+# ---------------------------------------------------------------------------
+
+
+def mac_open_document(
+    filepath: str = None,
+    visible: bool = True,
+    read_only: bool = False,
+    password: str = None,
+) -> str:
+    """Open a Word document on macOS via JXA."""
+    if not filepath:
+        # Just activate Word and return info about the active doc
+        result = _run_jxa("""
+var app = Application("Microsoft Word");
+app.activate();
+if (app.documents.length === 0) {
+    JSON.stringify({error: "No document is open. Provide a filepath to open one."});
+} else {
+    var d = app.documents[0];
+    JSON.stringify({
+        success: true,
+        document: d.name(),
+        full_path: d.posixFullName(),
+        pages: d.pageCount(),
+        saved: d.saved(),
+        message: "Active document is already open."
+    });
+}
+""")
+        return result
+
+    # Resolve the path
+    if not os.path.isabs(filepath):
+        filepath = os.path.normpath(os.path.join(os.getcwd(), filepath))
+
+    if not os.path.exists(filepath):
+        return json.dumps({"error": f"File not found: {filepath}"})
+
+    escaped_path = _escape_js(filepath)
+    visible_str = "true" if visible else "false"
+    read_only_str = "true" if read_only else "false"
+
+    script = f"""
+var app = Application("Microsoft Word");
+app.activate();
+try {{
+    var d = app.documents.open({escaped_path}, {{readOnly: {read_only_str}, addToRecentFiles: false}});
+    JSON.stringify({{
+        success: true,
+        document: d.name(),
+        full_path: d.posixFullName(),
+        pages: d.pageCount(),
+        saved: d.saved(),
+        message: "Opened '" + d.name() + "'"
+    }});
+}} catch (e) {{
+    JSON.stringify({{error: String(e)}});
+}}
+"""
+    return _run_jxa(script)
+
+
+def mac_close_document(
+    filename: str = None,
+    save_changes: str = "prompt",
+) -> str:
+    """Close a document on macOS via JXA."""
+    # Map save_changes to JXA boolean
+    save_map = {
+        "save": "true",
+        "dont": "false",
+        "discard": "false",
+        "don't": "false",
+        "prompt": "ask",
+    }
+    save_flag = save_map.get(save_changes.lower(), "ask")
+
+    if not filename:
+        # Close the active document
+        script = f"""
+var app = Application("Microsoft Word");
+if (app.documents.length === 0) {{
+    JSON.stringify({{error: "No documents are open in Word"}});
+}} else {{
+    var d = app.documents[0];
+    var name = d.name();
+    try {{
+        d.close({save_flag});
+        JSON.stringify({{success: true, closed_document: name, message: "Closed '" + name + "' (save_changes={save_changes})"}});
+    }} catch (e) {{
+        JSON.stringify({{error: String(e)}});
+    }}
+}}
+"""
+        return _run_jxa(script)
+
+    # Find and close by name
+    basename = unicodedata.normalize("NFC", os.path.basename(filename)).lower()
+    escaped_name = _escape_js(basename)
+
+    script = f"""
+var app = Application("Microsoft Word");
+var target = "{escaped_name}";
+var doc = null;
+for (var i = 0; i < app.documents.length; i++) {{
+    var n = app.documents[i].name().normalize("NFC").toLowerCase();
+    if (n === target) {{ doc = app.documents[i]; break; }}
+}}
+if (!doc) {{
+    var open = [];
+    for (var j = 0; j < app.documents.length; j++) open.push(app.documents[j].name());
+    JSON.stringify({{error: "Document '" + target + "' not open. Open: " + open.join(", ")}});
+}} else {{
+    var name = doc.name();
+    try {{
+        doc.close({save_flag});
+        JSON.stringify({{success: true, closed_document: name, message: "Closed '" + name + "' (save_changes={save_changes})"}});
+    }} catch (e) {{
+        JSON.stringify({{error: String(e)}});
+    }}
+}}
+"""
+    return _run_jxa(script)
