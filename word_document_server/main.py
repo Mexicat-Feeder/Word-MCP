@@ -1780,6 +1780,22 @@ def register_tools():
             filename, save_changes,
         )
 
+    # --- List open documents (live) ---
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word Live List Open Documents",
+            readOnlyHint=True,
+        ),
+    )
+    def word_live_list_open_documents():
+        """[Windows/macOS] List all documents currently open in Word.
+
+        Returns:
+            JSON with list of open documents, their paths, and modification status.
+        """
+        return live_tools.word_live_list_open_documents()
+
     # --- Layout, header/footer, spacing, bookmark, watermark tools ---
 
     @mcp.tool(

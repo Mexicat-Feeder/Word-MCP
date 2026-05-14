@@ -2708,3 +2708,75 @@ async def word_live_close_document(
     except Exception as e:
         return json.dumps({"error": str(e)})
 
+
+
+async def word_live_list_open_documents() -> str:
+    """[Windows/macOS] List all documents currently open in Word.
+
+    Returns:
+        JSON with list of open documents, their paths, and modification status.
+    """
+    if _MAC_AVAILABLE:
+        return _mac_list_open_documents()
+
+    if sys.platform != "win32":
+        return json.dumps({"error": "Live editing is only available on Windows"})
+
+    try:
+        from word_document_server.core.word_com import get_word_app
+
+        app = get_word_app()
+
+        if app.Documents.Count == 0:
+            return json.dumps({
+                "success": True,
+                "open_documents": [],
+                "count": 0,
+                "message": "No documents are currently open in Word",
+            })
+
+        docs = []
+        for i in range(1, app.Documents.Count + 1):
+            doc = app.Documents(i)
+            docs.append({
+                "name": doc.Name,
+                "full_path": doc.FullName if doc.FullName else "",
+                "saved": bool(doc.Saved),
+                "path": doc.Path if doc.Path else "",
+                "pages": doc.ComputeStatistics(2),
+                "word_count": doc.ComputeStatistics(0),
+            })
+
+        return json.dumps({
+            "success": True,
+            "open_documents": docs,
+            "count": len(docs),
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def _mac_list_open_documents() -> str:
+    """List open documents on macOS via JXA."""
+    script = """
+var app = Application("Microsoft Word");
+if (app.documents.length === 0) {
+    JSON.stringify({success: true, open_documents: [], count: 0, message: "No documents are currently open in Word"});
+} else {
+    var docs = [];
+    for (var i = 0; i < app.documents.length; i++) {
+        var d = app.documents[i];
+        docs.push({
+            name: d.name(),
+            full_path: d.posixFullName() || "",
+            saved: d.saved(),
+            path: d.path() || "",
+            pages: d.pageCount(),
+            word_count: d.wordCount()
+        });
+    }
+    JSON.stringify({success: true, open_documents: docs, count: docs.length});
+}
+"""
+    return _run_jxa(script)
