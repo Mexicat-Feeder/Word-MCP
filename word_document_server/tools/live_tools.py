@@ -2596,6 +2596,7 @@ async def word_live_open_document(
         else:
             filepath = filename
 
+        filepath = os.path.abspath(filepath)
         if not os.path.exists(filepath):
             return json.dumps({"error": f"File not found: {filepath}"})
 
