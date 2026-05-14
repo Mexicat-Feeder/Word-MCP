@@ -2511,3 +2511,200 @@ async def word_live_insert_equation(
 
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Open / Close document
+# ---------------------------------------------------------------------------
+
+
+
+async def word_live_open_document(
+    filename: str = None,
+    directory: str = ".",
+    visible: bool = True,
+    read_only: bool = False,
+    password: str | None = None,
+) -> str:
+    """[Windows/macOS] Open a Word document so live tools can operate on it.
+
+    This is the counterpart to word_live_close_document.  All live COM/JXA
+    tools require the target document to be open in Word first.
+
+    Reuses the same directory-search pattern as list_available_documents.
+
+    Args:
+        filename: Name of the .docx file to open (e.g. "report.docx").
+        directory: Directory to search in (defaults to ".", the working dir).
+        visible:  Whether to show the Word window (default True).
+        read_only: Open the file in read-only mode (default False).
+        password: Password for encrypted documents (optional).
+
+    Returns:
+        JSON with success status, document name, full path, and page count.
+    """
+    if _MAC_AVAILABLE:
+        return mac_open_document(filename=filename, directory=directory, visible=visible, read_only=read_only, password=password)
+
+    if sys.platform != "win32":
+        return json.dumps({"error": "Live editing is only available on Windows"})
+
+    try:
+        from word_document_server.core.word_com import get_word_app
+
+        app = get_word_app()
+
+        # Make sure Word is visible
+        app.Visible = 1 if visible else 0
+
+        if not filename:
+            # Just activate Word and return info about the active doc
+            if app.Documents.Count == 0:
+                return json.dumps({"error": "No document is open. Provide a filename to open one."})
+            doc = app.ActiveDocument
+            return json.dumps({
+                "success": True,
+                "document": doc.Name,
+                "full_path": doc.FullName,
+                "pages": doc.ComputeStatistics(2),
+                "saved": bool(doc.Saved),
+                "message": "Active document is already open.",
+            }, ensure_ascii=False)
+
+        # Resolve the filename to a full path by searching in the given directory.
+        # Reuses the same pattern as list_available_documents: search for .docx files.
+        if not os.path.isabs(filename):
+            target_dir = directory or "."
+            if os.path.isdir(target_dir):
+                candidates = [f for f in os.listdir(target_dir) if f.lower().endswith(".docx")]
+                # Case-insensitive match on basename
+                target_lower = os.path.basename(filename).lower()
+                for candidate in candidates:
+                    if candidate.lower() == target_lower:
+                        filepath = os.path.join(target_dir, candidate)
+                        break
+                else:
+                    # Fallback: try treating filename as a path relative to cwd
+                    filepath = os.path.normpath(os.path.join(os.getcwd(), filename))
+                    if not os.path.exists(filepath):
+                        return json.dumps({
+                            "error": f"File '{filename}' not found in '{target_dir}'. "
+                            f"Available documents: {", ".join(sorted(candidates))}"
+                        })
+            else:
+                filepath = os.path.normpath(os.path.join(os.getcwd(), filename))
+        else:
+            filepath = filename
+
+        filepath = os.path.abspath(filepath)
+        if not os.path.exists(filepath):
+            return json.dumps({"error": f"File not found: {filepath}"})
+
+        # Word COM Open signature:
+        # Documents.Open(FileName, ConfirmConversions, ReadOnly, AddToRecentFiles,
+        #                PasswordDocument, PasswordTemplate, Revert,
+        #                WritePasswordDocument, WritePasswordTemplate, Format,
+        #                Encoding, Visible, OpenAndRepair, DocumentDirection,
+        #                NoEncodingDialog, VisibleByDefault)
+        doc = app.Documents.Open(
+            FileName=filepath,
+            ConfirmConversions=False,
+            ReadOnly=read_only,
+            AddToRecentFiles=False,
+            PasswordDocument=password or "",
+            PasswordTemplate="",
+            Revert=True,
+            WritePasswordDocument="",
+            WritePasswordTemplate="",
+            Format=0,
+            Encoding=65001,  # UTF-8
+            Visible=visible,
+            OpenAndRepair=False,
+            DocumentDirection=1,  # wdDirectionLTR
+            NoEncodingDialog=False,
+        )
+
+        return json.dumps({
+            "success": True,
+            "document": doc.Name,
+            "full_path": doc.FullName,
+            "pages": doc.ComputeStatistics(2),
+            "saved": bool(doc.Saved),
+            "message": f"Opened '{doc.Name}'",
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+async def word_live_close_document(
+    filename: str = None,
+    save_changes: str = "prompt",
+) -> str:
+    """[Windows/macOS] Close a document that is currently open in Word.
+
+    Args:
+        filename: Document name or path (None = active document).
+        save_changes: How to handle unsaved changes:
+            - "save"   : Save before closing
+            - "don't"  : Discard changes
+            - "prompt" : Ask the user (default, Word's normal behavior)
+
+    Returns:
+        JSON with success status and document name.
+    """
+    if _MAC_AVAILABLE:
+        return mac_close_document(filename=filename, save_changes=save_changes)
+
+    if sys.platform != "win32":
+        return json.dumps({"error": "Live editing is only available on Windows"})
+
+    try:
+        from word_document_server.core.word_com import get_word_app, find_document
+
+        app = get_word_app()
+
+        # Map save_changes string to Word constant
+        wdDoNotSaveChanges = 0
+        wdPromptToSaveChanges = -1
+        wdSaveChanges = 1
+
+        save_map = {
+            "save": wdSaveChanges,
+            "dont": wdDoNotSaveChanges,
+            "discard": wdDoNotSaveChanges,
+            "prompt": wdPromptToSaveChanges,
+        }
+        save_flag = save_map.get(save_changes.lower(), wdPromptToSaveChanges)
+
+        # If no filename, close the active document
+        if not filename:
+            if app.Documents.Count == 0:
+                return json.dumps({"error": "No documents are open in Word"})
+            doc = app.ActiveDocument
+            name = doc.Name
+            doc.Close(save_flag)
+            # If no documents left, quit Word gracefully
+            if app.Documents.Count == 0:
+                app.Quit()
+            return json.dumps({
+                "success": True,
+                "closed_document": name,
+                "message": f"Closed '{name}' (save_changes={save_changes})",
+            }, ensure_ascii=False)
+
+        doc = find_document(app, filename)
+        name = doc.Name
+        doc.Close(save_flag)
+        # If no documents left, quit Word gracefully
+        if app.Documents.Count == 0:
+            app.Quit()
+        return json.dumps({
+            "success": True,
+            "closed_document": name,
+            "message": f"Closed '{name}' (save_changes={save_changes})",
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
