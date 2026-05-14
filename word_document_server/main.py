@@ -1753,17 +1753,18 @@ def register_tools():
             title="Word Live Open Document",
         ),
     )
+
     def word_live_open_document(
-        filepath: str = None,
+        filename: str = None,
+        directory: str = ".",
         visible: bool = True,
         read_only: bool = False,
         password: str = None,
     ):
         """[Windows/macOS] Open a Word document so live tools can operate on it. Requires Word running."""
         return live_tools.word_live_open_document(
-            filepath, visible, read_only, password,
+            filename, directory, visible, read_only, password,
         )
-
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Word Live Close Document",

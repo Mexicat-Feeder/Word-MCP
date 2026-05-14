@@ -1135,20 +1135,25 @@ app.activate();
 # ---------------------------------------------------------------------------
 
 
+
 def mac_open_document(
-    filepath: str = None,
+    filename: str = None,
+    directory: str = ".",
     visible: bool = True,
     read_only: bool = False,
     password: str = None,
 ) -> str:
-    """Open a Word document on macOS via JXA."""
-    if not filepath:
+    """Open a Word document on macOS via JXA.
+
+    Reuses the same directory-search pattern as list_available_documents.
+    """
+    if not filename:
         # Just activate Word and return info about the active doc
         result = _run_jxa("""
 var app = Application("Microsoft Word");
 app.activate();
 if (app.documents.length === 0) {
-    JSON.stringify({error: "No document is open. Provide a filepath to open one."});
+    JSON.stringify({error: "No document is open. Provide a filename to open one."});
 } else {
     var d = app.documents[0];
     JSON.stringify({
@@ -1163,9 +1168,28 @@ if (app.documents.length === 0) {
 """)
         return result
 
-    # Resolve the path
-    if not os.path.isabs(filepath):
-        filepath = os.path.normpath(os.path.join(os.getcwd(), filepath))
+    # Resolve the filename to a full path by searching in the given directory.
+    # Reuses the same pattern as list_available_documents: search for .docx files.
+    if not os.path.isabs(filename):
+        target_dir = directory or "."
+        if os.path.isdir(target_dir):
+            candidates = [f for f in os.listdir(target_dir) if f.lower().endswith(".docx")]
+            target_lower = os.path.basename(filename).lower()
+            for candidate in candidates:
+                if candidate.lower() == target_lower:
+                    filepath = os.path.join(target_dir, candidate)
+                    break
+            else:
+                filepath = os.path.normpath(os.path.join(os.getcwd(), filename))
+                if not os.path.exists(filepath):
+                    return json.dumps({
+                        "error": f"File '{filename}' not found in '{target_dir}'. "
+                        f"Available documents: {", ".join(sorted(candidates))}"
+                    })
+        else:
+            filepath = os.path.normpath(os.path.join(os.getcwd(), filename))
+    else:
+        filepath = filename
 
     if not os.path.exists(filepath):
         return json.dumps({"error": f"File not found: {filepath}"})
@@ -1193,6 +1217,66 @@ try {{
 """
     return _run_jxa(script)
 
+
+def mac_close_document(
+    filename: str = None,
+    save_changes: str = "prompt",
+) -> str:
+    """Close a document on macOS via JXA."""
+    save_map = {
+        "save": "true",
+        "dont": "false",
+        "discard": "false",
+        "don't": "false",
+        "prompt": "ask",
+    }
+    save_flag = save_map.get(save_changes.lower(), "ask")
+
+    if not filename:
+        script = f"""
+var app = Application("Microsoft Word");
+if (app.documents.length === 0) {{
+    JSON.stringify({{error: "No documents are open in Word"}});
+}} else {{
+    var d = app.documents[0];
+    var name = d.name();
+    try {{
+        d.close({save_flag});
+        JSON.stringify({{success: true, closed_document: name, message: "Closed '" + name + "' (save_changes={save_changes})"}});
+    }} catch (e) {{
+        JSON.stringify({{error: String(e)}});
+    }}
+}}
+"""
+        return _run_jxa(script)
+
+    # Find and close by name
+    basename = unicodedata.normalize("NFC", os.path.basename(filename)).lower()
+    escaped_name = _escape_js(basename)
+
+    script = f"""
+var app = Application("Microsoft Word");
+var target = "{escaped_name}";
+var doc = null;
+for (var i = 0; i < app.documents.length; i++) {{
+    var n = app.documents[i].name().normalize("NFC").toLowerCase();
+    if (n === target) {{ doc = app.documents[i]; break; }}
+}}
+if (!doc) {{
+    var open = [];
+    for (var j = 0; j < app.documents.length; j++) open.push(app.documents[j].name());
+    JSON.stringify({{error: "Document '" + target + "' not open. Open: " + open.join(", ")}});
+}} else {{
+    var name = doc.name();
+    try {{
+        doc.close({save_flag});
+        JSON.stringify({{success: true, closed_document: name, message: "Closed '" + name + "' (save_changes={save_changes})"}});
+    }} catch (e) {{
+        JSON.stringify({{error: String(e)}});
+    }}
+}}
+"""
+    return _run_jxa(script)
 
 def mac_close_document(
     filename: str = None,
