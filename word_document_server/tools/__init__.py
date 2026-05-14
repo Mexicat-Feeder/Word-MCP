@@ -52,7 +52,7 @@ from word_document_server.tools import tracked_changes_tools
 
 # Live tools (open/close document)
 from word_document_server.tools.live_tools import (
-    word_live_open_document, word_live_close_document,
+    word_live_open_document, word_live_close_document, word_live_list_open_documents,
 )
 
 
