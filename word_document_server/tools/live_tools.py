@@ -22,6 +22,40 @@ WD_STORY = 6
 _INSERT_CHUNK_SIZE = 30000
 
 
+def _word_specials_to_text(text: str) -> str:
+    """Convert Word Find replacement tokens to characters for Range.Text."""
+    return (
+        text.replace("^p", "\r")
+        .replace("^t", "\t")
+        .replace("^m", "\x0c")
+        .replace("^s", "\u00a0")
+    )
+
+
+def _paragraph_insert_payload(paragraphs: list) -> str:
+    """Build Word paragraph text that keeps inserted paragraphs separate."""
+    cleaned = [
+        str(p).replace("\r\n", "\r").replace("\n", "\r").rstrip("\r")
+        for p in paragraphs
+    ]
+    return "\r".join(cleaned) + "\r"
+
+
+def _style_inserted_paragraphs(doc, start: int, end: int, style_name: str) -> None:
+    """Best-effort style application for paragraphs just inserted through COM."""
+    if not style_name:
+        return
+    try:
+        rng = doc.Range(start, end)
+        for i in range(1, rng.Paragraphs.Count + 1):
+            try:
+                rng.Paragraphs(i).Range.Style = style_name
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 async def word_live_insert_text(
     filename: str = None,
     text: str = "",
@@ -960,11 +994,18 @@ async def word_live_replace_text(
                 # infinite loop (tracked deletions stay visible to Find).
                 doc.TrackRevisions = False
 
+            prev_smart_cut_paste = None
             try:
                 count = 0
                 MAX_REPLACEMENTS = 50_000  # safety ceiling
                 rng = doc.Content.Duplicate
                 rng.Find.ClearFormatting()
+                processed = _word_specials_to_text(replace_text)
+                try:
+                    prev_smart_cut_paste = app.Options.SmartCutPaste
+                    app.Options.SmartCutPaste = False
+                except Exception:
+                    pass
 
                 while True:
                     found = rng.Find.Execute(
@@ -984,16 +1025,21 @@ async def word_live_replace_text(
                         continue
                     # Convert Word special characters to actual characters for rng.Text assignment
                     # (rng.Text doesn't interpret ^p/^t/^m like Find.Execute Replace does)
-                    processed = replace_text.replace("^p", "\r").replace("^t", "\t").replace("^m", "\x0c").replace("^s", "\u00a0")
-                    rng.Delete()
-                    rng.InsertAfter(processed)
+                    start_after = rng.Start + len(processed)
+                    rng.Text = processed
                     count += 1
                     if not replace_all:
                         break
                     if count >= MAX_REPLACEMENTS:
                         break
                     rng.Collapse(0)  # wdCollapseEnd — move past replacement
+                    rng.SetRange(start_after, doc.Content.End)
             finally:
+                if prev_smart_cut_paste is not None:
+                    try:
+                        app.Options.SmartCutPaste = prev_smart_cut_paste
+                    except Exception:
+                        pass
                 doc.TrackRevisions = prev_tracking
                 if track_changes:
                     app.UserName = prev_author
@@ -1094,33 +1140,22 @@ async def word_live_insert_paragraphs(
                 app.UserName = DEFAULT_AUTHOR
 
             try:
-                inserted = 0
-
+                payload = _paragraph_insert_payload(paragraphs)
                 if position == "after":
-                    rng = target_para.Range.Duplicate
-                    rng.Collapse(0)  # wdCollapseEnd
-                    for para_text in paragraphs:
-                        rng.InsertParagraphAfter()
-                        rng.Collapse(0)  # wdCollapseEnd
-                        rng.InsertAfter(para_text)
-                        try:
-                            rng.Style = resolved_style
-                        except Exception:
-                            pass
-                        rng.Collapse(0)  # wdCollapseEnd
-                        inserted += 1
+                    insert_at = target_para.Range.End
+                    rng = doc.Range(insert_at, insert_at)
+                    rng.InsertAfter(payload)
+                    _style_inserted_paragraphs(
+                        doc, insert_at, insert_at + len(payload), resolved_style
+                    )
                 else:  # "before"
-                    for para_text in reversed(paragraphs):
-                        rng = target_para.Range.Duplicate
-                        rng.Collapse(1)  # wdCollapseStart
-                        rng.InsertParagraphBefore()
-                        rng.Collapse(1)  # wdCollapseStart
-                        rng.InsertAfter(para_text)
-                        try:
-                            rng.Style = resolved_style
-                        except Exception:
-                            pass
-                        inserted += 1
+                    insert_at = target_para.Range.Start
+                    rng = doc.Range(insert_at, insert_at)
+                    rng.InsertBefore(payload)
+                    _style_inserted_paragraphs(
+                        doc, insert_at, insert_at + len(payload), resolved_style
+                    )
+                inserted = len(paragraphs)
             finally:
                 doc.TrackRevisions = prev_tracking
                 if track_changes:
@@ -1796,7 +1831,10 @@ async def word_live_save(
         doc = find_document(app, filename)
 
         if save_as:
-            save_path = os.path.abspath(save_as)
+            save_path = os.path.abspath(os.path.expanduser(save_as))
+            save_dir = os.path.dirname(save_path)
+            if save_dir:
+                os.makedirs(save_dir, exist_ok=True)
             # Determine format from extension
             ext = os.path.splitext(save_path)[1].lower()
             format_map = {
