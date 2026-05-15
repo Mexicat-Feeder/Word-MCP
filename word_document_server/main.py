@@ -1042,11 +1042,11 @@ def register_tools():
         filename: str = None,
         table_index: int = -1,
         border_style: str = None,
-        cell_bold: list = None,
-        cell_alignment: list = None,
-        column_widths: list = None,
+        cell_bold: list[list] = None,
+        cell_alignment: list[list] = None,
+        column_widths: list[float] = None,
         table_alignment: str = None,
-        cell_shading: list = None,
+        cell_shading: list[list] = None,
         autofit: str = None,
     ):
         return live_tools.word_live_format_table(
@@ -1141,8 +1141,8 @@ def register_tools():
     )
     def word_live_setup_heading_numbering(
         filename: str = None,
-        h1_paragraphs: list = None,
-        h2_paragraphs: list = None,
+        h1_paragraphs: list[int] = None,
+        h2_paragraphs: list[int] = None,
         strip_manual_numbers: bool = True,
         h1_number_format: str = None,
         h2_number_format: str = None,
