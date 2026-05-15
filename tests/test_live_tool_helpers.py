@@ -1,4 +1,6 @@
 from word_document_server.tools.live_tools import (
+    _coerce_int_list,
+    _coerce_table_entry,
     _paragraph_insert_payload,
     _word_specials_to_text,
 )
@@ -18,3 +20,16 @@ def test_paragraph_insert_payload_normalizes_existing_newlines():
     payload = _paragraph_insert_payload(["First\nline", "Second\r\nline\r"])
 
     assert payload == "First\rline\rSecond\rline\r"
+
+
+def test_coerce_int_list_accepts_string_numbers():
+    assert _coerce_int_list(["1", 2, "3"]) == [1, 2, 3]
+
+
+def test_coerce_table_entry_accepts_nested_list_and_json_string():
+    assert _coerce_table_entry([1, 0, "#DDDDDD"], 3, "cell_shading") == [
+        1,
+        0,
+        "#DDDDDD",
+    ]
+    assert _coerce_table_entry('[1, 1, true]', 3, "cell_bold") == [1, 1, True]

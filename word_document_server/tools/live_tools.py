@@ -56,6 +56,24 @@ def _style_inserted_paragraphs(doc, start: int, end: int, style_name: str) -> No
         pass
 
 
+def _coerce_int_list(values: list | None) -> list[int]:
+    if values is None:
+        return []
+    return [int(value) for value in values]
+
+
+def _coerce_table_entry(entry: object, expected_len: int, name: str) -> list:
+    """Accept nested arrays or JSON-like string entries from MCP clients."""
+    if isinstance(entry, str):
+        try:
+            entry = json.loads(entry)
+        except Exception as exc:
+            raise ValueError(f"{name} entry must be a list, got string {entry!r}") from exc
+    if not isinstance(entry, (list, tuple)) or len(entry) != expected_len:
+        raise ValueError(f"{name} entry must be a {expected_len}-item list, got {entry!r}")
+    return list(entry)
+
+
 async def word_live_insert_text(
     filename: str = None,
     text: str = "",
@@ -534,8 +552,8 @@ async def word_live_apply_list(
 
 async def word_live_setup_heading_numbering(
     filename: str = None,
-    h1_paragraphs: list = None,
-    h2_paragraphs: list = None,
+    h1_paragraphs: list[int] = None,
+    h2_paragraphs: list[int] = None,
     strip_manual_numbers: bool = True,
     h1_number_format: str = None,
     h2_number_format: str = None,
@@ -606,6 +624,8 @@ async def word_live_setup_heading_numbering(
 
         app = get_word_app()
         doc = find_document(app, filename)
+        h1_paragraphs = _coerce_int_list(h1_paragraphs)
+        h2_paragraphs = _coerce_int_list(h2_paragraphs)
 
         def _find_para_text(doc, text):
             """Find paragraph text in doc body, return range or None."""
@@ -1326,11 +1346,11 @@ async def word_live_format_table(
     filename: str = None,
     table_index: int = -1,
     border_style: str = None,
-    cell_bold: list = None,
-    cell_alignment: list = None,
-    column_widths: list = None,
+    cell_bold: list[list] = None,
+    cell_alignment: list[list] = None,
+    column_widths: list[float] = None,
     table_alignment: str = None,
-    cell_shading: list = None,
+    cell_shading: list[list] = None,
     autofit: str = None,
 ) -> str:
     """Format a table in an open Word document via COM.
@@ -1430,7 +1450,8 @@ async def word_live_format_table(
 
             # --- Cell bold ---
             if cell_bold is not None:
-                for entry in cell_bold:
+                for raw_entry in cell_bold:
+                    entry = _coerce_table_entry(raw_entry, 3, "cell_bold")
                     r, c, bold_val = int(entry[0]), int(entry[1]), bool(entry[2])
                     if 1 <= r <= tbl.Rows.Count and 1 <= c <= tbl.Columns.Count:
                         tbl.Cell(r, c).Range.Font.Bold = bold_val
@@ -1439,7 +1460,8 @@ async def word_live_format_table(
             # --- Cell alignment ---
             if cell_alignment is not None:
                 PARA_ALIGN = {"left": 0, "center": 1, "right": 2, "justify": 3}
-                for entry in cell_alignment:
+                for raw_entry in cell_alignment:
+                    entry = _coerce_table_entry(raw_entry, 3, "cell_alignment")
                     r, c, align = int(entry[0]), int(entry[1]), str(entry[2]).lower()
                     al = PARA_ALIGN.get(align, 0)
                     if r == 0 and c == 0:
@@ -1462,7 +1484,8 @@ async def word_live_format_table(
 
             # --- Cell shading ---
             if cell_shading is not None:
-                for entry in cell_shading:
+                for raw_entry in cell_shading:
+                    entry = _coerce_table_entry(raw_entry, 3, "cell_shading")
                     r, c, color_hex = int(entry[0]), int(entry[1]), str(entry[2])
                     # Convert #RRGGBB to Word BGR integer
                     color_hex = color_hex.lstrip("#")

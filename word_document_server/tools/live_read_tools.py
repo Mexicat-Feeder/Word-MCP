@@ -1010,15 +1010,32 @@ async def word_live_delete_comment(
 
         comment = doc.Comments(comment_index)
         comment_text = str(comment.Range.Text)[:100] if comment.Range else ""
+        reply_count = 0
+        try:
+            reply_count = int(comment.Replies.Count)
+        except Exception:
+            pass
 
         with undo_record(app, "MCP: Delete Comment"):
-            comment.Delete()
+            if reply_count:
+                try:
+                    comment.DeleteRecursively()
+                except AttributeError:
+                    return json.dumps({
+                        "error": (
+                            "This comment has replies and this Word version does "
+                            "not expose DeleteRecursively via COM."
+                        )
+                    })
+            else:
+                comment.Delete()
 
         return json.dumps({
             "success": True,
             "document": doc.Name,
             "deleted_comment_index": comment_index,
             "deleted_comment_text": comment_text,
+            "deleted_reply_count": reply_count,
             "remaining_comments": doc.Comments.Count,
         }, ensure_ascii=False)
 
@@ -1127,14 +1144,19 @@ async def word_live_accept_revisions(
             if revision_ids is not None:
                 # Accept specific revisions (process in reverse to preserve indices)
                 accepted = 0
+                missing_ids = []
                 for rid in sorted(revision_ids, reverse=True):
                     if 1 <= rid <= doc.Revisions.Count:
                         doc.Revisions(rid).Accept()
                         accepted += 1
+                    else:
+                        missing_ids.append(rid)
                 return json.dumps({
                     "success": True,
                     "document": doc.Name,
                     "accepted": accepted,
+                    "requested": len(revision_ids),
+                    "missing_ids": sorted(missing_ids),
                     "mode": "specific_ids",
                 })
 
@@ -1198,14 +1220,19 @@ async def word_live_reject_revisions(
         with undo_record(app, "MCP: Reject Revisions"):
             if revision_ids is not None:
                 rejected = 0
+                missing_ids = []
                 for rid in sorted(revision_ids, reverse=True):
                     if 1 <= rid <= doc.Revisions.Count:
                         doc.Revisions(rid).Reject()
                         rejected += 1
+                    else:
+                        missing_ids.append(rid)
                 return json.dumps({
                     "success": True,
                     "document": doc.Name,
                     "rejected": rejected,
+                    "requested": len(revision_ids),
+                    "missing_ids": sorted(missing_ids),
                     "mode": "specific_ids",
                 })
 
