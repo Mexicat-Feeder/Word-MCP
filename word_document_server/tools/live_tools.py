@@ -2668,7 +2668,7 @@ async def word_live_close_document(
         # Map save_changes string to Word constant
         wdDoNotSaveChanges = 0
         wdPromptToSaveChanges = -1
-        wdSaveChanges = 1
+        wdSaveChanges = 2
 
         save_map = {
             "save": wdSaveChanges,
