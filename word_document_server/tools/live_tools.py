@@ -985,7 +985,8 @@ async def word_live_replace_text(
                     # Convert Word special characters to actual characters for rng.Text assignment
                     # (rng.Text doesn't interpret ^p/^t/^m like Find.Execute Replace does)
                     processed = replace_text.replace("^p", "\r").replace("^t", "\t").replace("^m", "\x0c").replace("^s", "\u00a0")
-                    rng.Text = processed
+                    rng.Delete()
+                    rng.InsertAfter(processed)
                     count += 1
                     if not replace_all:
                         break
