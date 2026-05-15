@@ -2685,7 +2685,7 @@ async def word_live_close_document(
             if doc is None:
                 return json.dumps({"error": "No active document found"})
             name = doc.Name
-            doc.Close(save_flag)
+            doc.Close(SaveChanges=save_flag)
             # If no documents left, quit Word gracefully
             if app.Documents.Count == 0:
                 app.Quit()
@@ -2706,7 +2706,7 @@ async def word_live_close_document(
         if not fresh_doc:
             return json.dumps({"error": f"Document '{filename}' not found in open documents"})
         name = fresh_doc.Name
-        fresh_doc.Close(save_flag)
+        fresh_doc.Close(SaveChanges=save_flag)
         # If no documents left, quit Word gracefully
         if app.Documents.Count == 0:
             app.Quit()
