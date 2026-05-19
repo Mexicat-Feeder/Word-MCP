@@ -32,6 +32,27 @@ For long documents, use `word_live_get_page_text` instead of reading the entire
 document. It returns `char_start` and `char_end` offsets that can be passed to
 formatting and delete tools.
 
+## Parameter Conventions
+
+Agents should prefer these names across tools:
+
+- `start` and `end` for character offsets.
+- `paragraph_index` for a paragraph number. Check each tool description for
+  whether it is 0-based or 1-based.
+- `row` and `col` for a single table cell.
+- `find_text` and `replace_text` for search/replace operations.
+- `target_text` for text used as an anchor for comments, footnotes, or nearby
+  insertion.
+- `comment_text` for the body of a comment or comment reply.
+- `position` for insertion placement such as `start`, `end`, `before`, or
+  `after`.
+
+Avoid older names such as `start_pos`, `end_pos`, `row_index`, `col_index`,
+`text_to_find`, `text_content`, `target_paragraph_index`, `search_text`, and
+`insert_position` when calling MCP tools. Those names may still appear inside
+implementation code or older examples, but the public tool schema uses the
+simpler names above.
+
 ## File Paths And Roots
 
 - Relative filenames resolve from the server process working directory.
@@ -223,7 +244,7 @@ For a tracked edit:
 For a comment:
 
 1. `word_live_find_text`
-2. `word_live_add_comment(start=..., end=..., author=...)`
+2. `word_live_add_comment(start=..., end=..., comment_text=..., author=...)`
 3. `word_live_get_comments`
 
 For table updates:
