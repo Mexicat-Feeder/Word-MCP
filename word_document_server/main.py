@@ -29,6 +29,7 @@ from word_document_server.tools import (
     tracked_changes_tools,
     live_tools,
     live_read_tools,
+    live_v2_tools,
     live_layout_tools,
     screen_capture_tools,
     layout_tools,
@@ -909,6 +910,252 @@ def register_tools():
         """[Windows only] Capture a screenshot of a Word document window.
         Returns the path to the saved PNG image. Requires Word to be running."""
         return screen_capture_tools.word_screen_capture(filename, output_path)
+
+    # --- V2 live-COM tools: grouped, agent-friendly primary surface ---
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Open",
+            destructiveHint=False,
+        ),
+    )
+    def word_v2_open(
+        path: str = None,
+        directory: str = ".",
+        visible: bool = True,
+        read_only: bool = False,
+        password: str | None = None,
+    ):
+        """Open a Word document in live COM mode and return a session_id.
+        Use this before all other word_v2_* tools."""
+        return live_v2_tools.word_v2_open(path, directory, visible, read_only, password)
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Save",
+            destructiveHint=True,
+        ),
+    )
+    def word_v2_save(session_id: str, out: str = None):
+        """Save a v2 live session in place, or save as out."""
+        return live_v2_tools.word_v2_save(session_id, out)
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Close",
+            destructiveHint=True,
+        ),
+    )
+    def word_v2_close(session_id: str, save_changes: str = "save"):
+        """Close a v2 live session. save_changes: save, discard/dont, or prompt."""
+        return live_v2_tools.word_v2_close(session_id, save_changes)
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Get Content",
+            readOnlyHint=True,
+        ),
+    )
+    def word_v2_get_content(
+        session_id: str,
+        action: str = "text",
+        page: int = 1,
+        end_page: int = None,
+        start_paragraph: int = None,
+        end_paragraph: int = None,
+        include_runs: bool = False,
+    ):
+        """Read live document content. Actions: text, page_text, info, comments, revisions, paragraph_format."""
+        return live_v2_tools.word_v2_get_content(
+            session_id, action, page, end_page, start_paragraph, end_paragraph, include_runs
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Search",
+            readOnlyHint=True,
+        ),
+    )
+    def word_v2_search(
+        session_id: str,
+        find_text: str,
+        match_case: bool = False,
+        whole_word: bool = False,
+        use_wildcards: bool = False,
+        context_chars: int = 80,
+        max_results: int = 20,
+    ):
+        """Find text and return reusable handles for later v2 edit/format/comment calls."""
+        return live_v2_tools.word_v2_search(
+            session_id, find_text, match_case, whole_word, use_wildcards, context_chars, max_results
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Edit",
+            destructiveHint=True,
+        ),
+    )
+    def word_v2_edit(
+        session_id: str,
+        action: str,
+        text: str = "",
+        find_text: str = "",
+        replace_text: str = "",
+        handle: str = None,
+        target: dict = None,
+        start: int = None,
+        end: int = None,
+        position: str = "end",
+        replace_all: bool = False,
+        match_case: bool = False,
+        whole_word: bool = False,
+        use_wildcards: bool = False,
+        paragraphs: list = None,
+        paragraph_index: int = None,
+        style: str = None,
+        track_changes: bool = False,
+        times: int = 1,
+    ):
+        """Edit live text. Actions: insert, replace, delete, insert_paragraphs, undo."""
+        return live_v2_tools.word_v2_edit(
+            session_id, action, text, find_text, replace_text, handle, target,
+            start, end, position, replace_all, match_case, whole_word,
+            use_wildcards, paragraphs, paragraph_index, style, track_changes, times,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Format",
+            destructiveHint=True,
+        ),
+    )
+    def word_v2_format(
+        session_id: str,
+        action: str = "inline",
+        handle: str = None,
+        target: dict = None,
+        start: int = None,
+        end: int = None,
+        start_paragraph: int = None,
+        end_paragraph: int = None,
+        bold: bool = None,
+        italic: bool = None,
+        underline: bool = None,
+        strikethrough: bool = None,
+        font_name: str = None,
+        font_size: float = None,
+        font_color: str = None,
+        highlight_color: int = None,
+        style_name: str = None,
+        paragraph_alignment: str = None,
+        page_break_before: bool = None,
+        preserve_direct_formatting: bool = False,
+        list_type: str = "bullet",
+        level: int = 0,
+        remove: bool = False,
+        continue_previous: bool = False,
+        track_changes: bool = False,
+    ):
+        """Apply live formatting. Actions: inline, paragraph, style, list."""
+        return live_v2_tools.word_v2_format(
+            session_id, action, handle, target, start, end, start_paragraph, end_paragraph,
+            bold, italic, underline, strikethrough, font_name, font_size, font_color,
+            highlight_color, style_name, paragraph_alignment, page_break_before,
+            preserve_direct_formatting, list_type, level, remove, continue_previous, track_changes,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Comment",
+            destructiveHint=True,
+        ),
+    )
+    def word_v2_comment(
+        session_id: str,
+        action: str,
+        comment_text: str = "",
+        comment_index: int = None,
+        handle: str = None,
+        target: dict = None,
+        start: int = None,
+        end: int = None,
+        paragraph_index: int = None,
+        author: str = DEFAULT_AUTHOR,
+        resolve: bool = True,
+    ):
+        """Manage comments. Actions: create, reply, resolve, delete, list, get."""
+        return live_v2_tools.word_v2_comment(
+            session_id, action, comment_text, comment_index, handle, target,
+            start, end, paragraph_index, author, resolve,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Track Changes",
+            destructiveHint=True,
+        ),
+    )
+    def word_v2_track_changes(
+        session_id: str,
+        action: str,
+        enable: bool = None,
+        author: str = None,
+        revision_ids: list[int] = None,
+        decision: str = "accept",
+    ):
+        """Manage tracked changes. Actions: toggle, list, accept, reject, decide."""
+        return live_v2_tools.word_v2_track_changes(session_id, action, enable, author, revision_ids, decision)
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Table",
+            destructiveHint=True,
+        ),
+    )
+    def word_v2_table(
+        session_id: str,
+        action: str,
+        table_index: int = 1,
+        rows: int = 2,
+        cols: int = 2,
+        position: str = "end",
+        data: list = None,
+        row: int = None,
+        col: int = None,
+        text: str = None,
+        cells: list = None,
+        start_row: int = None,
+        start_col: int = None,
+        end_row: int = None,
+        end_col: int = None,
+        style: str = "Table Grid",
+        autofit: str = "window",
+        border_style: str = None,
+        cell_bold: list[list] = None,
+        cell_alignment: list[list] = None,
+        column_widths: list[float] = None,
+        table_alignment: str = None,
+        cell_shading: list[list] = None,
+        track_changes: bool = False,
+    ):
+        """Create, edit, and format tables through the live COM engine."""
+        return live_v2_tools.word_v2_table(
+            session_id, action, table_index, rows, cols, position, data,
+            row, col, text, cells, start_row, start_col, end_row, end_col,
+            style, autofit, border_style, cell_bold, cell_alignment,
+            column_widths, table_alignment, cell_shading, track_changes,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Mutations",
+            destructiveHint=True,
+        ),
+    )
+    def word_v2_mutations(session_id: str, action: str, operations: list[dict] = None):
+        """Preview or apply a batch of v2 operations. Actions: preview, apply."""
+        return live_v2_tools.word_v2_mutations(session_id, action, operations)
 
     @mcp.tool(
         annotations=ToolAnnotations(

@@ -19,7 +19,8 @@
 
 word-mcp-live gives any AI assistant that supports [MCP](https://modelcontextprotocol.io/) full control of Microsoft Word. Open a document, tell the AI what you need, and watch it happen — formatting, tracked changes, comments, and all. Changes appear live in your open document.
 
-For agent-specific live editing workflows and quirks, see [`LIVE_TOOLS_AGENT_GUIDE.md`](LIVE_TOOLS_AGENT_GUIDE.md).
+For the preferred grouped live-COM agent interface, see [`LIVE_V2_AGENT_GUIDE.md`](LIVE_V2_AGENT_GUIDE.md).
+For legacy `word_live_*` workflow details and quirks, see [`LIVE_TOOLS_AGENT_GUIDE.md`](LIVE_TOOLS_AGENT_GUIDE.md).
 
 <table>
 <tr>

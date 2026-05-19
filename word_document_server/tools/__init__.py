@@ -55,4 +55,7 @@ from word_document_server.tools.live_tools import (
     word_live_open_document, word_live_close_document, word_live_list_open_documents,
 )
 
+# V2 grouped live-COM facade
+from word_document_server.tools import live_v2_tools
+
 
