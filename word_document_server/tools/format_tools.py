@@ -36,8 +36,8 @@ async def format_text(filename: str, paragraph_index: int, start_pos: int, end_p
     Args:
         filename: Path to the Word document (must not be open in Word).
         paragraph_index: Index of the paragraph (0-based).
-        start_pos: Start position within the paragraph text.
-        end_pos: End position within the paragraph text.
+        start: Start position within the paragraph text.
+        end: End position within the paragraph text.
         bold: Set text bold (True/False).
         italic: Set text italic (True/False).
         underline: Set text underlined (True/False).
@@ -55,7 +55,7 @@ async def format_text(filename: str, paragraph_index: int, start_pos: int, end_p
         if font_size is not None:
             font_size = int(font_size)
     except (ValueError, TypeError):
-        return "Invalid parameter: paragraph_index, start_pos, end_pos, and font_size must be integers"
+        return "Invalid parameter: paragraph_index, start, end, and font_size must be integers"
     
     if not os.path.exists(filename):
         return f"Document {filename} does not exist"

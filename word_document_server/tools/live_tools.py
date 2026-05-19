@@ -1096,9 +1096,9 @@ async def word_live_insert_paragraphs(
     Args:
         filename: Document name or path (None = active document).
         paragraphs: List of paragraph texts to insert. Each string becomes one Word paragraph.
-        target_text: Text to search for (first matching paragraph). Mutually exclusive with target_paragraph_index.
+        target_text: Text to search for (first matching paragraph). Mutually exclusive with paragraph_index.
             Not required for position='start' or position='end'.
-        target_paragraph_index: 0-based paragraph index (as returned by word_live_get_text).
+        paragraph_index: 0-based paragraph index (as returned by word_live_get_text).
             Not required for position='start' or position='end'.
         position: 'start', 'end', 'before', or 'after' (default 'after').
         style: Style name for inserted paragraphs. None = "Normal" (avoids inheriting heading styles).
@@ -1120,10 +1120,10 @@ async def word_live_insert_paragraphs(
         return json.dumps({"error": f"position must be 'start', 'end', 'before', or 'after', got '{position}'"})
 
     if position in ("before", "after") and target_text is None and target_paragraph_index is None:
-        return json.dumps({"error": "Provide either target_text or target_paragraph_index"})
+        return json.dumps({"error": "Provide either target_text or paragraph_index"})
 
     if target_text is not None and target_paragraph_index is not None:
-        return json.dumps({"error": "Provide target_text or target_paragraph_index, not both"})
+        return json.dumps({"error": "Provide target_text or paragraph_index, not both"})
 
     try:
         from word_document_server.core.word_com import get_word_app, find_document, undo_record
@@ -1141,7 +1141,7 @@ async def word_live_insert_paragraphs(
             com_index = target_paragraph_index + 1  # 0-based API → 1-based COM
             if com_index < 1 or com_index > total_paras:
                 return json.dumps({
-                    "error": f"target_paragraph_index {target_paragraph_index} out of range "
+                    "error": f"paragraph_index {target_paragraph_index} out of range "
                     f"(0-{total_paras - 1})"
                 })
             target_para = doc.Paragraphs(com_index)
