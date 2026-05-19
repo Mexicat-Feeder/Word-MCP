@@ -656,9 +656,23 @@ async def word_live_get_comments(filename: str = None) -> str:
         app = get_word_app()
         doc = find_document(app, filename)
 
+        reply_indices = set()
+        for i in range(1, doc.Comments.Count + 1):
+            try:
+                c = doc.Comments(i)
+                for r_idx in range(1, c.Replies.Count + 1):
+                    reply_indices.add(c.Replies(r_idx).Index)
+            except Exception:
+                pass
+
         comments = []
         for i in range(1, doc.Comments.Count + 1):
             c = doc.Comments(i)
+            try:
+                if c.Index in reply_indices:
+                    continue
+            except Exception:
+                pass
             scope_text = ""
             try:
                 scope_text = c.Scope.Text[:100] if c.Scope and c.Scope.Text else ""
@@ -680,7 +694,7 @@ async def word_live_get_comments(filename: str = None) -> str:
                 pass  # Replies not supported in older Word versions
 
             comment_data = {
-                "index": i,
+                "index": c.Index,
                 "author": str(c.Author) if c.Author else "",
                 "date": str(c.Date) if c.Date else "",
                 "text": str(c.Range.Text) if c.Range and c.Range.Text else "",
@@ -759,19 +773,42 @@ async def word_live_add_comment(
         with undo_record(app, "MCP: Add Comment"):
             # Save and restore author
             prev_author = app.UserName
+            prev_initials = getattr(app, "UserInitials", "")
             app.UserName = author
             try:
+                app.UserInitials = "".join(part[0] for part in author.split() if part)[:3]
+            except Exception:
+                pass
+            try:
                 comment = doc.Comments.Add(rng, text)
+                try:
+                    comment.Author = author
+                except Exception:
+                    pass
             finally:
                 app.UserName = prev_author
+                try:
+                    app.UserInitials = prev_initials
+                except Exception:
+                    pass
 
-        return json.dumps({
+        actual_author = str(comment.Author) if comment.Author else ""
+
+        result = {
             "success": True,
             "document": doc.Name,
             "comment_index": comment.Index,
             "author": author,
+            "actual_author": actual_author,
+            "author_applied": actual_author == author,
             "text": text[:100],
-        }, ensure_ascii=False)
+        }
+        if not result["author_applied"]:
+            result["warning"] = (
+                "Word returned a different comment author; Microsoft 365 "
+                "Modern Comments may force the signed-in Office identity."
+            )
+        return json.dumps(result, ensure_ascii=False)
 
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -823,24 +860,47 @@ async def word_live_reply_to_comment(
 
         with undo_record(app, "MCP: Reply to Comment"):
             prev_author = app.UserName
+            prev_initials = getattr(app, "UserInitials", "")
             app.UserName = author
             try:
+                app.UserInitials = "".join(part[0] for part in author.split() if part)[:3]
+            except Exception:
+                pass
+            try:
                 reply = comment.Replies.Add(comment.Scope, text)
+                try:
+                    reply.Author = author
+                except Exception:
+                    pass
             except AttributeError:
                 return json.dumps({
                     "error": "Comment replies require Word 2016 or later."
                 })
             finally:
                 app.UserName = prev_author
+                try:
+                    app.UserInitials = prev_initials
+                except Exception:
+                    pass
 
-        return json.dumps({
+        actual_author = str(reply.Author) if reply.Author else ""
+
+        result = {
             "success": True,
             "document": doc.Name,
             "comment_index": comment_index,
             "reply_text": text[:100],
             "reply_index": reply.Index,
             "author": author,
-        }, ensure_ascii=False)
+            "actual_author": actual_author,
+            "author_applied": actual_author == author,
+        }
+        if not result["author_applied"]:
+            result["warning"] = (
+                "Word returned a different reply author; Microsoft 365 "
+                "Modern Comments may force the signed-in Office identity."
+            )
+        return json.dumps(result, ensure_ascii=False)
 
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -950,15 +1010,32 @@ async def word_live_delete_comment(
 
         comment = doc.Comments(comment_index)
         comment_text = str(comment.Range.Text)[:100] if comment.Range else ""
+        reply_count = 0
+        try:
+            reply_count = int(comment.Replies.Count)
+        except Exception:
+            pass
 
         with undo_record(app, "MCP: Delete Comment"):
-            comment.Delete()
+            if reply_count:
+                try:
+                    comment.DeleteRecursively()
+                except AttributeError:
+                    return json.dumps({
+                        "error": (
+                            "This comment has replies and this Word version does "
+                            "not expose DeleteRecursively via COM."
+                        )
+                    })
+            else:
+                comment.Delete()
 
         return json.dumps({
             "success": True,
             "document": doc.Name,
             "deleted_comment_index": comment_index,
             "deleted_comment_text": comment_text,
+            "deleted_reply_count": reply_count,
             "remaining_comments": doc.Comments.Count,
         }, ensure_ascii=False)
 
@@ -1067,14 +1144,19 @@ async def word_live_accept_revisions(
             if revision_ids is not None:
                 # Accept specific revisions (process in reverse to preserve indices)
                 accepted = 0
+                missing_ids = []
                 for rid in sorted(revision_ids, reverse=True):
                     if 1 <= rid <= doc.Revisions.Count:
                         doc.Revisions(rid).Accept()
                         accepted += 1
+                    else:
+                        missing_ids.append(rid)
                 return json.dumps({
                     "success": True,
                     "document": doc.Name,
                     "accepted": accepted,
+                    "requested": len(revision_ids),
+                    "missing_ids": sorted(missing_ids),
                     "mode": "specific_ids",
                 })
 
@@ -1138,14 +1220,19 @@ async def word_live_reject_revisions(
         with undo_record(app, "MCP: Reject Revisions"):
             if revision_ids is not None:
                 rejected = 0
+                missing_ids = []
                 for rid in sorted(revision_ids, reverse=True):
                     if 1 <= rid <= doc.Revisions.Count:
                         doc.Revisions(rid).Reject()
                         rejected += 1
+                    else:
+                        missing_ids.append(rid)
                 return json.dumps({
                     "success": True,
                     "document": doc.Name,
                     "rejected": rejected,
+                    "requested": len(revision_ids),
+                    "missing_ids": sorted(missing_ids),
                     "mode": "specific_ids",
                 })
 

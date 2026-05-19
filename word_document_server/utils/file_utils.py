@@ -33,6 +33,8 @@ def check_file_writeable(filepath: str) -> Tuple[bool, str]:
     Returns:
         Tuple of (is_writeable, error_message)
     """
+    filepath = os.path.abspath(os.path.expanduser(filepath))
+
     # If file doesn't exist, check if directory is writeable
     if not os.path.exists(filepath):
         directory = os.path.dirname(filepath)

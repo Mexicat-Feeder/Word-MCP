@@ -7,11 +7,11 @@ Supports multiple transports: stdio, sse, and streamable-http using standalone F
 import os
 import sys
 from dotenv import load_dotenv
-from word_document_server.defaults import DEFAULT_AUTHOR, DEFAULT_INITIALS
 
 # Load environment variables from .env file
 print("Loading configuration from .env file...", file=sys.stderr)
 load_dotenv()
+from word_document_server.defaults import DEFAULT_AUTHOR, DEFAULT_INITIALS
 # Set required environment variable for FastMCP 2.8.1+
 os.environ.setdefault('FASTMCP_LOG_LEVEL', 'INFO')
 from fastmcp import FastMCP
@@ -1042,11 +1042,11 @@ def register_tools():
         filename: str = None,
         table_index: int = -1,
         border_style: str = None,
-        cell_bold: list = None,
-        cell_alignment: list = None,
-        column_widths: list = None,
+        cell_bold: list[list] = None,
+        cell_alignment: list[list] = None,
+        column_widths: list[float] = None,
         table_alignment: str = None,
-        cell_shading: list = None,
+        cell_shading: list[list] = None,
         autofit: str = None,
     ):
         return live_tools.word_live_format_table(
@@ -1141,8 +1141,8 @@ def register_tools():
     )
     def word_live_setup_heading_numbering(
         filename: str = None,
-        h1_paragraphs: list = None,
-        h2_paragraphs: list = None,
+        h1_paragraphs: list[int] = None,
+        h2_paragraphs: list[int] = None,
         strip_manual_numbers: bool = True,
         h1_number_format: str = None,
         h2_number_format: str = None,
@@ -1773,7 +1773,7 @@ def register_tools():
     )
     def word_live_close_document(
         filename: str = None,
-        save_changes: str = "prompt",
+        save_changes: str = "save",
     ):
         """[Windows/macOS] Close a document that is currently open in Word. Requires Word running."""
         return live_tools.word_live_close_document(

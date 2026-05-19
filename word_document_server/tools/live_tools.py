@@ -22,6 +22,58 @@ WD_STORY = 6
 _INSERT_CHUNK_SIZE = 30000
 
 
+def _word_specials_to_text(text: str) -> str:
+    """Convert Word Find replacement tokens to characters for Range.Text."""
+    return (
+        text.replace("^p", "\r")
+        .replace("^t", "\t")
+        .replace("^m", "\x0c")
+        .replace("^s", "\u00a0")
+    )
+
+
+def _paragraph_insert_payload(paragraphs: list) -> str:
+    """Build Word paragraph text that keeps inserted paragraphs separate."""
+    cleaned = [
+        str(p).replace("\r\n", "\r").replace("\n", "\r").rstrip("\r")
+        for p in paragraphs
+    ]
+    return "\r".join(cleaned) + "\r"
+
+
+def _style_inserted_paragraphs(doc, start: int, end: int, style_name: str) -> None:
+    """Best-effort style application for paragraphs just inserted through COM."""
+    if not style_name:
+        return
+    try:
+        rng = doc.Range(start, end)
+        for i in range(1, rng.Paragraphs.Count + 1):
+            try:
+                rng.Paragraphs(i).Range.Style = style_name
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _coerce_int_list(values: list | None) -> list[int]:
+    if values is None:
+        return []
+    return [int(value) for value in values]
+
+
+def _coerce_table_entry(entry: object, expected_len: int, name: str) -> list:
+    """Accept nested arrays or JSON-like string entries from MCP clients."""
+    if isinstance(entry, str):
+        try:
+            entry = json.loads(entry)
+        except Exception as exc:
+            raise ValueError(f"{name} entry must be a list, got string {entry!r}") from exc
+    if not isinstance(entry, (list, tuple)) or len(entry) != expected_len:
+        raise ValueError(f"{name} entry must be a {expected_len}-item list, got {entry!r}")
+    return list(entry)
+
+
 async def word_live_insert_text(
     filename: str = None,
     text: str = "",
@@ -500,8 +552,8 @@ async def word_live_apply_list(
 
 async def word_live_setup_heading_numbering(
     filename: str = None,
-    h1_paragraphs: list = None,
-    h2_paragraphs: list = None,
+    h1_paragraphs: list[int] = None,
+    h2_paragraphs: list[int] = None,
     strip_manual_numbers: bool = True,
     h1_number_format: str = None,
     h2_number_format: str = None,
@@ -572,6 +624,8 @@ async def word_live_setup_heading_numbering(
 
         app = get_word_app()
         doc = find_document(app, filename)
+        h1_paragraphs = _coerce_int_list(h1_paragraphs)
+        h2_paragraphs = _coerce_int_list(h2_paragraphs)
 
         def _find_para_text(doc, text):
             """Find paragraph text in doc body, return range or None."""
@@ -960,11 +1014,18 @@ async def word_live_replace_text(
                 # infinite loop (tracked deletions stay visible to Find).
                 doc.TrackRevisions = False
 
+            prev_smart_cut_paste = None
             try:
                 count = 0
                 MAX_REPLACEMENTS = 50_000  # safety ceiling
                 rng = doc.Content.Duplicate
                 rng.Find.ClearFormatting()
+                processed = _word_specials_to_text(replace_text)
+                try:
+                    prev_smart_cut_paste = app.Options.SmartCutPaste
+                    app.Options.SmartCutPaste = False
+                except Exception:
+                    pass
 
                 while True:
                     found = rng.Find.Execute(
@@ -984,7 +1045,7 @@ async def word_live_replace_text(
                         continue
                     # Convert Word special characters to actual characters for rng.Text assignment
                     # (rng.Text doesn't interpret ^p/^t/^m like Find.Execute Replace does)
-                    processed = replace_text.replace("^p", "\r").replace("^t", "\t").replace("^m", "\x0c").replace("^s", "\u00a0")
+                    start_after = rng.Start + len(processed)
                     rng.Text = processed
                     count += 1
                     if not replace_all:
@@ -992,7 +1053,13 @@ async def word_live_replace_text(
                     if count >= MAX_REPLACEMENTS:
                         break
                     rng.Collapse(0)  # wdCollapseEnd — move past replacement
+                    rng.SetRange(start_after, doc.Content.End)
             finally:
+                if prev_smart_cut_paste is not None:
+                    try:
+                        app.Options.SmartCutPaste = prev_smart_cut_paste
+                    except Exception:
+                        pass
                 doc.TrackRevisions = prev_tracking
                 if track_changes:
                     app.UserName = prev_author
@@ -1093,33 +1160,22 @@ async def word_live_insert_paragraphs(
                 app.UserName = DEFAULT_AUTHOR
 
             try:
-                inserted = 0
-
+                payload = _paragraph_insert_payload(paragraphs)
                 if position == "after":
-                    rng = target_para.Range.Duplicate
-                    rng.Collapse(0)  # wdCollapseEnd
-                    for para_text in paragraphs:
-                        rng.InsertParagraphAfter()
-                        rng.Collapse(0)  # wdCollapseEnd
-                        rng.InsertAfter(para_text)
-                        try:
-                            rng.Style = resolved_style
-                        except Exception:
-                            pass
-                        rng.Collapse(0)  # wdCollapseEnd
-                        inserted += 1
+                    insert_at = target_para.Range.End
+                    rng = doc.Range(insert_at, insert_at)
+                    rng.InsertAfter(payload)
+                    _style_inserted_paragraphs(
+                        doc, insert_at, insert_at + len(payload), resolved_style
+                    )
                 else:  # "before"
-                    for para_text in reversed(paragraphs):
-                        rng = target_para.Range.Duplicate
-                        rng.Collapse(1)  # wdCollapseStart
-                        rng.InsertParagraphBefore()
-                        rng.Collapse(1)  # wdCollapseStart
-                        rng.InsertAfter(para_text)
-                        try:
-                            rng.Style = resolved_style
-                        except Exception:
-                            pass
-                        inserted += 1
+                    insert_at = target_para.Range.Start
+                    rng = doc.Range(insert_at, insert_at)
+                    rng.InsertBefore(payload)
+                    _style_inserted_paragraphs(
+                        doc, insert_at, insert_at + len(payload), resolved_style
+                    )
+                inserted = len(paragraphs)
             finally:
                 doc.TrackRevisions = prev_tracking
                 if track_changes:
@@ -1290,11 +1346,11 @@ async def word_live_format_table(
     filename: str = None,
     table_index: int = -1,
     border_style: str = None,
-    cell_bold: list = None,
-    cell_alignment: list = None,
-    column_widths: list = None,
+    cell_bold: list[list] = None,
+    cell_alignment: list[list] = None,
+    column_widths: list[float] = None,
     table_alignment: str = None,
-    cell_shading: list = None,
+    cell_shading: list[list] = None,
     autofit: str = None,
 ) -> str:
     """Format a table in an open Word document via COM.
@@ -1394,7 +1450,8 @@ async def word_live_format_table(
 
             # --- Cell bold ---
             if cell_bold is not None:
-                for entry in cell_bold:
+                for raw_entry in cell_bold:
+                    entry = _coerce_table_entry(raw_entry, 3, "cell_bold")
                     r, c, bold_val = int(entry[0]), int(entry[1]), bool(entry[2])
                     if 1 <= r <= tbl.Rows.Count and 1 <= c <= tbl.Columns.Count:
                         tbl.Cell(r, c).Range.Font.Bold = bold_val
@@ -1403,7 +1460,8 @@ async def word_live_format_table(
             # --- Cell alignment ---
             if cell_alignment is not None:
                 PARA_ALIGN = {"left": 0, "center": 1, "right": 2, "justify": 3}
-                for entry in cell_alignment:
+                for raw_entry in cell_alignment:
+                    entry = _coerce_table_entry(raw_entry, 3, "cell_alignment")
                     r, c, align = int(entry[0]), int(entry[1]), str(entry[2]).lower()
                     al = PARA_ALIGN.get(align, 0)
                     if r == 0 and c == 0:
@@ -1426,7 +1484,8 @@ async def word_live_format_table(
 
             # --- Cell shading ---
             if cell_shading is not None:
-                for entry in cell_shading:
+                for raw_entry in cell_shading:
+                    entry = _coerce_table_entry(raw_entry, 3, "cell_shading")
                     r, c, color_hex = int(entry[0]), int(entry[1]), str(entry[2])
                     # Convert #RRGGBB to Word BGR integer
                     color_hex = color_hex.lstrip("#")
@@ -1795,7 +1854,10 @@ async def word_live_save(
         doc = find_document(app, filename)
 
         if save_as:
-            save_path = os.path.abspath(save_as)
+            save_path = os.path.abspath(os.path.expanduser(save_as))
+            save_dir = os.path.dirname(save_path)
+            if save_dir:
+                os.makedirs(save_dir, exist_ok=True)
             # Determine format from extension
             ext = os.path.splitext(save_path)[1].lower()
             format_map = {
@@ -2639,7 +2701,7 @@ async def word_live_open_document(
 
 async def word_live_close_document(
     filename: str = None,
-    save_changes: str = "prompt",
+    save_changes: str = "save",
 ) -> str:
     """[Windows/macOS] Close a document that is currently open in Word.
 
@@ -2648,7 +2710,7 @@ async def word_live_close_document(
         save_changes: How to handle unsaved changes:
             - "save"   : Save before closing
             - "don't"  : Discard changes
-            - "prompt" : Ask the user (default, Word's normal behavior)
+            - "prompt" : Ask the user
 
     Returns:
         JSON with success status and document name.
@@ -2667,7 +2729,7 @@ async def word_live_close_document(
         # Map save_changes string to Word constant
         wdDoNotSaveChanges = 0
         wdPromptToSaveChanges = -1
-        wdSaveChanges = 1
+        wdSaveChanges = -2
 
         save_map = {
             "save": wdSaveChanges,
@@ -2682,8 +2744,10 @@ async def word_live_close_document(
             if app.Documents.Count == 0:
                 return json.dumps({"error": "No documents are open in Word"})
             doc = app.ActiveDocument
+            if doc is None:
+                return json.dumps({"error": "No active document found"})
             name = doc.Name
-            doc.Close(save_flag)
+            doc.Close(SaveChanges=save_flag)
             # If no documents left, quit Word gracefully
             if app.Documents.Count == 0:
                 app.Quit()
@@ -2693,9 +2757,18 @@ async def word_live_close_document(
                 "message": f"Closed '{name}' (save_changes={save_changes})",
             }, ensure_ascii=False)
 
-        doc = find_document(app, filename)
-        name = doc.Name
-        doc.Close(save_flag)
+        # Re-fetch doc from app.Documents to get a fresh COM reference
+        fresh_doc = None
+        target_name = filename.lower() if filename else None
+        for i in range(1, app.Documents.Count + 1):
+            d = app.Documents(i)
+            if target_name and d.Name.lower() == target_name:
+                fresh_doc = d
+                break
+        if not fresh_doc:
+            return json.dumps({"error": f"Document '{filename}' not found in open documents"})
+        name = fresh_doc.Name
+        fresh_doc.Close(SaveChanges=save_flag)
         # If no documents left, quit Word gracefully
         if app.Documents.Count == 0:
             app.Quit()

@@ -19,7 +19,13 @@ async def create_document(filename: str, title: Optional[str] = None, author: Op
         title: Optional title for the document metadata
         author: Optional author for the document metadata
     """
-    filename = ensure_docx_extension(filename)
+    filename = os.path.abspath(os.path.expanduser(ensure_docx_extension(filename)))
+    directory = os.path.dirname(filename)
+    if directory:
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except Exception as e:
+            return f"Cannot create document: Failed to create directory {directory}: {e}"
     
     # Check if file is writeable
     is_writeable, error_message = check_file_writeable(filename)
