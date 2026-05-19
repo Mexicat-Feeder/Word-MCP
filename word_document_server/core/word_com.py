@@ -38,7 +38,7 @@ def get_word_app():
         app_with_docs = _find_word_with_docs()
         if app_with_docs is not None:
             return app_with_docs
-        # No running instance found — create a new one
+        # No running instance found - create a new one
         app = win32com.client.Dispatch("Word.Application")
         app.Visible = 0
         return app

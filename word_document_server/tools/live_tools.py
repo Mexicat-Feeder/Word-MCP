@@ -1087,17 +1087,20 @@ async def word_live_insert_paragraphs(
     style: str = None,
     track_changes: bool = False,
 ) -> str:
-    """[Windows only] Insert one or more paragraphs near a target paragraph in an open Word document.
+    """[Windows only] Insert one or more paragraphs in an open Word document.
 
-    Targets by text match or paragraph index (0-based, matching word_live_get_text output).
+    Insert at document start/end, or near a target paragraph by text match or
+    paragraph index (0-based, matching word_live_get_text output).
     Inserts all paragraphs in a single undo record.
 
     Args:
         filename: Document name or path (None = active document).
         paragraphs: List of paragraph texts to insert. Each string becomes one Word paragraph.
         target_text: Text to search for (first matching paragraph). Mutually exclusive with target_paragraph_index.
+            Not required for position='start' or position='end'.
         target_paragraph_index: 0-based paragraph index (as returned by word_live_get_text).
-        position: 'before' or 'after' the target paragraph (default 'after').
+            Not required for position='start' or position='end'.
+        position: 'start', 'end', 'before', or 'after' (default 'after').
         style: Style name for inserted paragraphs. None = "Normal" (avoids inheriting heading styles).
         track_changes: Track insertions as revisions.
 
@@ -1113,14 +1116,14 @@ async def word_live_insert_paragraphs(
     if not paragraphs or not isinstance(paragraphs, list):
         return json.dumps({"error": "paragraphs must be a non-empty list of strings"})
 
-    if target_text is None and target_paragraph_index is None:
+    if position not in ("start", "end", "before", "after"):
+        return json.dumps({"error": f"position must be 'start', 'end', 'before', or 'after', got '{position}'"})
+
+    if position in ("before", "after") and target_text is None and target_paragraph_index is None:
         return json.dumps({"error": "Provide either target_text or target_paragraph_index"})
 
     if target_text is not None and target_paragraph_index is not None:
         return json.dumps({"error": "Provide target_text or target_paragraph_index, not both"})
-
-    if position not in ("before", "after"):
-        return json.dumps({"error": f"position must be 'before' or 'after', got '{position}'"})
 
     try:
         from word_document_server.core.word_com import get_word_app, find_document, undo_record
@@ -1132,7 +1135,9 @@ async def word_live_insert_paragraphs(
         total_paras = doc.Paragraphs.Count
         target_para = None
 
-        if target_paragraph_index is not None:
+        if position in ("start", "end"):
+            pass
+        elif target_paragraph_index is not None:
             com_index = target_paragraph_index + 1  # 0-based API → 1-based COM
             if com_index < 1 or com_index > total_paras:
                 return json.dumps({
@@ -1161,8 +1166,22 @@ async def word_live_insert_paragraphs(
 
             try:
                 payload = _paragraph_insert_payload(paragraphs)
-                if position == "after":
-                    insert_at = target_para.Range.End
+                if position == "end":
+                    insert_at = max(doc.Content.Start, doc.Content.End - 1)
+                    rng = doc.Range(insert_at, insert_at)
+                    rng.InsertAfter(payload)
+                    _style_inserted_paragraphs(
+                        doc, insert_at, insert_at + len(payload), resolved_style
+                    )
+                elif position == "start":
+                    insert_at = doc.Content.Start
+                    rng = doc.Range(insert_at, insert_at)
+                    rng.InsertBefore(payload)
+                    _style_inserted_paragraphs(
+                        doc, insert_at, insert_at + len(payload), resolved_style
+                    )
+                elif position == "after":
+                    insert_at = min(target_para.Range.End, doc.Content.End - 1)
                     rng = doc.Range(insert_at, insert_at)
                     rng.InsertAfter(payload)
                     _style_inserted_paragraphs(
