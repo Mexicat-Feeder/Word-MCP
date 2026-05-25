@@ -1,4 +1,6 @@
 import pytest
+import json
+import asyncio
 
 from word_document_server.tools import live_v2_tools
 
@@ -45,3 +47,11 @@ def test_target_range_requires_selection_start_and_end():
 
     with pytest.raises(ValueError, match="requires start and end"):
         live_v2_tools._target_range({"kind": "selection", "start": 1})
+
+
+def test_save_requires_output_path_for_unsaved_sessions():
+    session_id = live_v2_tools._register_session({"document": "Document1", "full_path": ""})
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_save(session_id)))
+
+    assert "unsaved document" in result["error"]

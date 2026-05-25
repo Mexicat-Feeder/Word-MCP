@@ -288,8 +288,10 @@ async def word_live_get_text(filename: str = None) -> str:
 
         paragraphs = []
         for i in range(1, total_paras + 1):
-            text = doc.Paragraphs(i).Range.Text.rstrip("\r\x07")
-            paragraphs.append({"index": i, "text": text})
+            para = doc.Paragraphs(i)
+            text = para.Range.Text.rstrip("\r\x07")
+            style = str(para.Style) if para.Style else ""
+            paragraphs.append({"index": i, "text": text, "style": style})
 
         return json.dumps({
             "success": True,
@@ -1344,9 +1346,11 @@ async def word_live_get_page_text(
                 break
 
             text = para.Range.Text.rstrip("\r\x07")
+            style = str(para.Style) if para.Style else ""
             paragraphs.append({
                 "index": i,
                 "text": text,
+                "style": style,
                 "char_start": p_start,
                 "char_end": p_end,
             })

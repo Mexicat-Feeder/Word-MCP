@@ -2872,3 +2872,283 @@ if (app.documents.length === 0) {
 }
 """
     return _run_jxa(script)
+
+
+async def word_live_add_hyperlink(
+    filename: str = None,
+    url: str = "",
+    text: str = "",
+    start: int = None,
+    end: int = None,
+) -> str:
+    """[Windows only] Add a hyperlink to a range or cursor in an open Word document.
+
+    Args:
+        filename: Document name or path (None = active document).
+        url: The URL target of the hyperlink.
+        text: The display text of the hyperlink.
+        start: Character offset start of range to convert to hyperlink.
+        end: Character offset end of range to convert to hyperlink.
+
+    Returns:
+        JSON status of operation.
+    """
+    if sys.platform != "win32":
+        return json.dumps({"error": "Live editing is only available on Windows"})
+    if not url:
+        return json.dumps({"success": False, "error": "url is required"})
+
+    try:
+        from word_document_server.core.word_com import get_word_app, find_document, undo_record
+
+        app = get_word_app()
+        doc = find_document(app, filename)
+
+        with undo_record(app, "MCP: Add Hyperlink"):
+            if start is not None and end is not None:
+                rng = doc.Range(int(start), int(end))
+            else:
+                rng = app.Selection.Range
+
+            if rng.Start == rng.End and text:
+                rng.Text = text
+
+            text_to_display = text if text else rng.Text
+            doc.Hyperlinks.Add(Anchor=rng, Address=url, TextToDisplay=text_to_display)
+
+        return json.dumps({"success": True, "message": "Hyperlink added successfully"})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+async def word_live_add_footnote(
+    filename: str = None,
+    text: str = "",
+    start: int = None,
+    end: int = None,
+) -> str:
+    """[Windows only] Add a footnote to a range in an open Word document.
+
+    Args:
+        filename: Document name or path (None = active document).
+        text: The text content of the footnote.
+        start: Character offset start of range where footnote marker is inserted.
+        end: Character offset end of range where footnote marker is inserted.
+
+    Returns:
+        JSON status of operation.
+    """
+    if sys.platform != "win32":
+        return json.dumps({"error": "Live editing is only available on Windows"})
+    if not text:
+        return json.dumps({"success": False, "error": "text is required"})
+
+    try:
+        from word_document_server.core.word_com import get_word_app, find_document, undo_record
+
+        app = get_word_app()
+        doc = find_document(app, filename)
+
+        with undo_record(app, "MCP: Add Footnote"):
+            if start is not None and end is not None:
+                rng = doc.Range(int(start), int(end))
+            else:
+                rng = app.Selection.Range
+
+            fn = doc.Footnotes.Add(Range=rng)
+            fn.Range.Text = text
+            index = fn.Index
+
+        return json.dumps({
+            "success": True,
+            "index": index,
+            "message": f"Footnote #{index} added successfully"
+        })
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+async def word_live_delete_footnote(
+    filename: str = None,
+    index: int = None,
+) -> str:
+    """[Windows only] Delete a footnote by index in an open Word document.
+
+    Args:
+        filename: Document name or path (None = active document).
+        index: 1-based index of the footnote to delete.
+
+    Returns:
+        JSON status of operation.
+    """
+    if sys.platform != "win32":
+        return json.dumps({"error": "Live editing is only available on Windows"})
+    if index is None:
+        return json.dumps({"success": False, "error": "index is required"})
+
+    try:
+        from word_document_server.core.word_com import get_word_app, find_document, undo_record
+
+        app = get_word_app()
+        doc = find_document(app, filename)
+
+        if index < 1 or index > doc.Footnotes.Count:
+            return json.dumps({"success": False, "error": f"Footnote index {index} out of range (1 to {doc.Footnotes.Count})"})
+
+        with undo_record(app, "MCP: Delete Footnote"):
+            doc.Footnotes(int(index)).Delete()
+        return json.dumps({"success": True, "message": f"Footnote #{index} deleted successfully"})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+async def word_live_protect_document(
+    filename: str = None,
+    protection_type: str = "read_only",
+    password: str = None,
+) -> str:
+    """[Windows only] Protect an open Word document to restrict editing.
+
+    Args:
+        filename: Document name or path (None = active document).
+        protection_type: "read_only", "comments", "tracked_changes"
+        password: Optional password to protect the document.
+
+    Returns:
+        JSON status of operation.
+    """
+    if sys.platform != "win32":
+        return json.dumps({"error": "Live editing is only available on Windows"})
+
+    try:
+        from word_document_server.core.word_com import get_word_app, find_document
+
+        app = get_word_app()
+        doc = find_document(app, filename)
+
+        type_map = {
+            "tracked_changes": 0,
+            "comments": 1,
+            "read_only": 3
+        }
+        prot_val = type_map.get(protection_type.lower())
+        if prot_val is None:
+            return json.dumps({
+                "success": False,
+                "error": f"Invalid protection_type '{protection_type}'. Use 'read_only', 'comments', or 'tracked_changes'"
+            })
+
+        doc.Protect(Type=prot_val, Password=password if password else "")
+
+        return json.dumps({
+            "success": True,
+            "protection_type": protection_type,
+            "message": f"Document protected successfully (type: {protection_type})"
+        })
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+async def word_live_unprotect_document(
+    filename: str = None,
+    password: str = None,
+) -> str:
+    """[Windows only] Unprotect an open Word document to allow full editing.
+
+    Args:
+        filename: Document name or path (None = active document).
+        password: The password used to protect the document (if any).
+
+    Returns:
+        JSON status of operation.
+    """
+    if sys.platform != "win32":
+        return json.dumps({"error": "Live editing is only available on Windows"})
+
+    try:
+        from word_document_server.core.word_com import get_word_app, find_document
+
+        app = get_word_app()
+        doc = find_document(app, filename)
+
+        doc.Unprotect(Password=password if password else "")
+
+        return json.dumps({
+            "success": True,
+            "message": "Document unprotected successfully"
+        })
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+async def word_live_convert_to_pdf(
+    filename: str = None,
+    pdf_path: str = "",
+) -> str:
+    """[Windows only] Convert the open Word document to a PDF file natively.
+
+    Args:
+        filename: Document name or path (None = active document).
+        pdf_path: Full destination path of the output PDF file.
+
+    Returns:
+        JSON status of operation.
+    """
+    if sys.platform != "win32":
+        return json.dumps({"error": "Live editing is only available on Windows"})
+    if not pdf_path:
+        return json.dumps({"success": False, "error": "pdf_path is required"})
+
+    try:
+        from word_document_server.core.word_com import get_word_app, find_document
+
+        app = get_word_app()
+        doc = find_document(app, filename)
+
+        # wdExportFormatPDF = 17, wdExportCreateWordBookmarks = 1
+        doc.ExportAsFixedFormat(
+            OutputFileName=os.path.abspath(pdf_path),
+            ExportFormat=17,
+            OpenAfterExport=False,
+            CreateBookmarks=1
+        )
+
+        return json.dumps({
+            "success": True,
+            "pdf_path": pdf_path,
+            "message": f"Document converted to PDF successfully at {pdf_path}"
+        })
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+async def word_live_create_document(
+    visible: bool = True,
+) -> str:
+    """[Windows only] Create a brand new blank document in the running Word app.
+
+    Args:
+        visible: Make the Word application window visible.
+
+    Returns:
+        JSON details of the new document.
+    """
+    if sys.platform != "win32":
+        return json.dumps({"error": "Live editing is only available on Windows"})
+
+    try:
+        from word_document_server.core.word_com import get_word_app
+
+        app = get_word_app()
+        app.Visible = 1 if visible else 0
+
+        doc = app.Documents.Add()
+
+        return json.dumps({
+            "success": True,
+            "document": doc.Name,
+            "full_path": doc.FullName if doc.FullName else "",
+            "message": f"New blank document '{doc.Name}' created successfully in live session"
+        })
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})

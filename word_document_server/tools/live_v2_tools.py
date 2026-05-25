@@ -126,14 +126,17 @@ async def word_v2_open(
     read_only: bool = False,
     password: str | None = None,
 ) -> str:
-    """Open a document in Word and create a v2 live session."""
-    result = _load_result(await live_tools.word_live_open_document(
-        filename=path,
-        directory=directory,
-        visible=visible,
-        read_only=read_only,
-        password=password,
-    ))
+    """Open a document in Word and create a v2 live session. Spawns a blank document if path is None."""
+    if not path:
+        result = _load_result(await live_tools.word_live_create_document(visible=visible))
+    else:
+        result = _load_result(await live_tools.word_live_open_document(
+            filename=path,
+            directory=directory,
+            visible=visible,
+            read_only=read_only,
+            password=password,
+        ))
     if result.get("error"):
         return _dump(result)
 
@@ -148,11 +151,23 @@ async def word_v2_open(
 
 
 async def word_v2_save(session_id: str, out: str = None) -> str:
-    """Save a v2 live session in place or to a new path."""
+    """Save a v2 live session in place, to a new path, or export as PDF."""
     try:
+        session = _sessions.get(session_id)
+        if not session:
+            raise ValueError(f"Unknown session_id: {session_id}")
+        if not out and not session.get("full_path"):
+            return _dump({
+                "error": "This session is an unsaved document. Provide out='path.docx' for the first save."
+            })
         filename = _resolve_filename(session_id=session_id)
     except ValueError as exc:
         return _dump({"error": str(exc)})
+
+    if out and out.lower().endswith(".pdf"):
+        result = _load_result(await live_tools.word_live_convert_to_pdf(filename=filename, pdf_path=out))
+        result["session_id"] = session_id
+        return _dump(result)
 
     result = _load_result(await live_tools.word_live_save(filename=filename, save_as=out))
     if not result.get("error"):
@@ -279,8 +294,10 @@ async def word_v2_edit(
     style: str = None,
     track_changes: bool = False,
     times: int = 1,
+    url: str = "",
+    footnote_index: int = None,
 ) -> str:
-    """Perform live text edits. Actions: insert, replace, delete, insert_paragraphs, undo."""
+    """Perform live text edits. Actions: insert, replace, delete, insert_paragraphs, undo, add_hyperlink, add_footnote, delete_footnote."""
     try:
         filename = _resolve_filename(session_id=session_id)
     except ValueError as exc:
@@ -333,10 +350,32 @@ async def word_v2_edit(
             ))
         elif action == "undo":
             result = _load_result(await live_tools.word_live_undo(filename, times))
+        elif action == "add_hyperlink":
+            if handle or target or (start is not None and end is not None):
+                resolved = _resolve_target(session_id, handle, target, start, end)
+                target_start, target_end = _target_range(resolved)
+            else:
+                target_start, target_end = None, None
+            result = _load_result(await live_tools.word_live_add_hyperlink(
+                filename=filename, url=url, text=text, start=target_start, end=target_end
+            ))
+        elif action == "add_footnote":
+            if handle or target or (start is not None and end is not None):
+                resolved = _resolve_target(session_id, handle, target, start, end)
+                target_start, target_end = _target_range(resolved)
+            else:
+                target_start, target_end = None, None
+            result = _load_result(await live_tools.word_live_add_footnote(
+                filename=filename, text=text, start=target_start, end=target_end
+            ))
+        elif action == "delete_footnote":
+            result = _load_result(await live_tools.word_live_delete_footnote(
+                filename=filename, index=footnote_index
+            ))
         else:
             return _dump({
                 "error": "Invalid action",
-                "valid_actions": ["insert", "replace", "delete", "insert_paragraphs", "undo"],
+                "valid_actions": ["insert", "replace", "delete", "insert_paragraphs", "undo", "add_hyperlink", "add_footnote", "delete_footnote"],
             })
     except ValueError as exc:
         return _dump({"error": str(exc)})
@@ -362,8 +401,8 @@ async def word_v2_format(
     font_size: float = None,
     font_color: str = None,
     highlight_color: int = None,
-    style_name: str = None,
-    paragraph_alignment: str = None,
+    style: str = None,
+    alignment: str = None,
     page_break_before: bool = None,
     preserve_direct_formatting: bool = False,
     list_type: str = "bullet",
@@ -386,7 +425,7 @@ async def word_v2_format(
         result = _load_result(await live_tools.word_live_format_text(
             filename, start, end, start_paragraph, end_paragraph,
             bold, italic, underline, strikethrough, font_name, font_size,
-            font_color, highlight_color, style_name, paragraph_alignment,
+            font_color, highlight_color, style, alignment,
             page_break_before, preserve_direct_formatting, track_changes,
         ))
     elif action == "list":
@@ -404,8 +443,8 @@ async def word_v2_format(
 async def word_v2_comment(
     session_id: str,
     action: str,
-    comment_text: str = "",
-    comment_index: int = None,
+    comment_id: int = None,
+    text: str = "",
     handle: str = None,
     target: dict = None,
     start: int = None,
@@ -427,23 +466,23 @@ async def word_v2_comment(
                 resolved = _resolve_target(session_id, handle, target, start, end)
                 start, end = _target_range(resolved)
             result = _load_result(await live_read_tools.word_live_add_comment(
-                filename, start, end, paragraph_index, comment_text, author,
+                filename, start, end, paragraph_index, text, author,
             ))
         elif action == "reply":
             result = _load_result(await live_read_tools.word_live_reply_to_comment(
-                filename, comment_index, comment_text, author,
+                filename, comment_id, text, author,
             ))
         elif action == "resolve":
             result = _load_result(await live_read_tools.word_live_resolve_comment(
-                filename, comment_index, resolve,
+                filename, comment_id, resolve,
             ))
         elif action == "delete":
-            result = _load_result(await live_read_tools.word_live_delete_comment(filename, comment_index))
+            result = _load_result(await live_read_tools.word_live_delete_comment(filename, comment_id))
         elif action in {"list", "get"}:
             result = _load_result(await live_read_tools.word_live_get_comments(filename))
-            if action == "get" and comment_index is not None and not result.get("error"):
+            if action == "get" and comment_id is not None and not result.get("error"):
                 comments = result.get("comments", [])
-                result["comment"] = next((c for c in comments if c.get("index") == comment_index), None)
+                result["comment"] = next((c for c in comments if c.get("index") == comment_id), None)
         else:
             return _dump({"error": "Invalid action", "valid_actions": ["create", "reply", "resolve", "delete", "list", "get"]})
     except ValueError as exc:
@@ -458,7 +497,7 @@ async def word_v2_track_changes(
     action: str,
     enable: bool = None,
     author: str = None,
-    revision_ids: list[int] = None,
+    change_ids: list[int] = None,
     decision: str = "accept",
 ) -> str:
     """Manage tracked changes. Actions: toggle, list, accept, reject, decide."""
@@ -473,9 +512,9 @@ async def word_v2_track_changes(
     elif action == "list":
         result = _load_result(await live_read_tools.word_live_list_revisions(filename))
     elif action == "accept" or (action == "decide" and decision == "accept"):
-        result = _load_result(await live_read_tools.word_live_accept_revisions(filename, author, revision_ids))
+        result = _load_result(await live_read_tools.word_live_accept_revisions(filename, author, change_ids))
     elif action == "reject" or (action == "decide" and decision == "reject"):
-        result = _load_result(await live_read_tools.word_live_reject_revisions(filename, author, revision_ids))
+        result = _load_result(await live_read_tools.word_live_reject_revisions(filename, author, change_ids))
     else:
         return _dump({"error": "Invalid action", "valid_actions": ["toggle", "list", "accept", "reject", "decide"]})
 
@@ -592,3 +631,35 @@ async def word_v2_mutations(
             return _dump({"success": False, "session_id": session_id, "results": results})
 
     return _dump({"success": True, "session_id": session_id, "results": results})
+
+
+async def word_v2_protection(
+    session_id: str,
+    action: str,
+    protection_type: str = "read_only",
+    password: str = None,
+) -> str:
+    """Manage editing protection on a live session.
+
+    Actions: protect, unprotect.
+    Protection Types: read_only, comments, tracked_changes.
+    """
+    try:
+        filename = _resolve_filename(session_id=session_id)
+    except ValueError as exc:
+        return _dump({"error": str(exc)})
+
+    action = (action or "").lower()
+    if action == "protect":
+        result = _load_result(await live_tools.word_live_protect_document(
+            filename=filename, protection_type=protection_type, password=password
+        ))
+    elif action == "unprotect":
+        result = _load_result(await live_tools.word_live_unprotect_document(
+            filename=filename, password=password
+        ))
+    else:
+        return _dump({"error": "Invalid action. Supported actions: 'protect', 'unprotect'"})
+
+    result["session_id"] = session_id
+    return _dump(result)
