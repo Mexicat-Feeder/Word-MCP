@@ -2668,10 +2668,10 @@ async def word_live_open_document(
                     # Fallback: try treating filename as a path relative to cwd
                     filepath = os.path.normpath(os.path.join(os.getcwd(), filename))
                     if not os.path.exists(filepath):
-                        return json.dumps({
-                            "error": f"File '{filename}' not found in '{target_dir}'. "
-                            f"Available documents: {", ".join(sorted(candidates))}"
-                        })
+                          available = ", ".join(sorted(candidates))
+                          return json.dumps({
+                              "error": f"File '{filename}' not found in '{target_dir}'. Available documents: {available}"
+                          })
             else:
                 filepath = os.path.normpath(os.path.join(os.getcwd(), filename))
         else:
