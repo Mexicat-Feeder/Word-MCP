@@ -569,7 +569,7 @@ async def word_live_setup_heading_numbering(
     h2_space_after: float = None,
     line_spacing: float = None,
 ) -> str:
-    """[Windows only] Set up auto-numbered headings with multilevel list (1. / 1.1).
+    r"""[Windows only] Set up auto-numbered headings with multilevel list (1. / 1.1).
 
     Creates a multilevel list template linked to Heading 1 and Heading 2 styles.
     Default formats: Level 1 = "%1." (produces "1."), Level 2 = "%1.%2" (produces "1.1").
@@ -1294,10 +1294,8 @@ async def word_live_add_table(
                         "error": (
                             f"position offset {offset} sits immediately after "
                             f"an orphan cell separator (\\x07). Run "
-                            f"word_live_modify_table operation='delete_table' "
-                            f"with scrub_orphans=True (the default) on the "
-                            f"prior table, or use word_live_diagnose_layout "
-                            f"to locate and clean separators."
+                            f"word_v2_table action='delete_table' on the "
+                            f"prior table before inserting new content."
                         )
                     })
 

@@ -7,7 +7,7 @@ def _registered_tools():
     tree = ast.parse(main_py.read_text(encoding="utf-8"))
 
     for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
 
         for decorator in node.decorator_list:

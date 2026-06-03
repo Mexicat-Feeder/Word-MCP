@@ -1,11 +1,11 @@
 # Live V2 Agent Guide
 
-The `word_v2_*` tools are the preferred interface for agents that edit documents
-through Microsoft Word COM. They are intentionally grouped by intent so local
-models have fewer tool names to choose from.
+The `word_v2_*` tools are the only public MCP interface for agents that edit
+documents through Microsoft Word COM. They are intentionally grouped by intent
+so local models have fewer tool names to choose from.
 
-The older `word_live_*` tools still exist for compatibility and advanced escape
-hatches. Prefer v2 first.
+Lower-level `word_live_*` helpers still exist inside the codebase as
+implementation details, but they are not registered as MCP tools.
 
 ## Core Workflow
 

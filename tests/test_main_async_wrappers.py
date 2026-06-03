@@ -4,10 +4,21 @@ from pathlib import Path
 
 ASYNC_TOOL_MODULES = {
     "live_v2_tools",
-    "live_tools",
-    "live_read_tools",
-    "live_layout_tools",
-    "screen_capture_tools",
+}
+
+EXPECTED_PUBLIC_TOOLS = {
+    "word_v2_open",
+    "word_v2_save",
+    "word_v2_close",
+    "word_v2_get_content",
+    "word_v2_search",
+    "word_v2_edit",
+    "word_v2_format",
+    "word_v2_comment",
+    "word_v2_track_changes",
+    "word_v2_table",
+    "word_v2_mutations",
+    "word_v2_protection",
 }
 
 
@@ -46,6 +57,14 @@ def test_registered_word_tools_are_async_wrappers():
 
     sync_tools = [node.name for node in tools if not isinstance(node, ast.AsyncFunctionDef)]
     assert not sync_tools, f"Registered wrappers must be async: {sync_tools}"
+
+
+def test_public_tool_surface_is_v2_only():
+    tool_names = {node.name for node in _decorated_word_tools()}
+
+    assert tool_names == EXPECTED_PUBLIC_TOOLS
+    assert not any(name.startswith("word_live_") for name in tool_names)
+    assert "word_screen_capture" not in tool_names
 
 
 def test_registered_word_tools_await_async_implementations():
