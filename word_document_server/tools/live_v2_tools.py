@@ -8,6 +8,7 @@ so v2 can improve tool ergonomics without rewriting Word automation logic.
 from __future__ import annotations
 
 import json
+import sys
 import time
 import uuid
 from typing import Any
@@ -18,6 +19,94 @@ from word_document_server.tools import live_read_tools, live_tools
 
 _sessions: dict[str, dict[str, Any]] = {}
 _handles: dict[str, dict[str, dict[str, Any]]] = {}
+
+DEFAULT_TEMPLATE_ID = "default_plain"
+SUPPORTED_BLUEPRINT_BLOCKS = {
+    "paragraph",
+    "heading",
+    "list",
+    "table",
+    "image_placeholder",
+    "page_break",
+    "section_break",
+}
+
+PAGE_SIZES = {
+    "letter": (612, 792),
+    "a4": (595, 842),
+}
+
+DEFAULT_PAGE_SETUP = {
+    "size": "letter",
+    "orientation": "portrait",
+    "margins": {
+        "top": 72,
+        "bottom": 72,
+        "left": 72,
+        "right": 72,
+    },
+}
+
+DEFAULT_STYLE_PROFILE = {
+    "Normal": {
+        "font_name": "Aptos",
+        "font_size": 11,
+        "space_after": 6,
+        "line_spacing_rule": 0,
+    },
+    "Heading 1": {
+        "font_name": "Aptos Display",
+        "font_size": 18,
+        "bold": True,
+        "space_before": 18,
+        "space_after": 6,
+        "keep_with_next": True,
+    },
+    "Heading 2": {
+        "font_name": "Aptos Display",
+        "font_size": 14,
+        "bold": True,
+        "space_before": 12,
+        "space_after": 4,
+        "keep_with_next": True,
+    },
+    "Heading 3": {
+        "font_name": "Aptos Display",
+        "font_size": 12,
+        "bold": True,
+        "space_before": 8,
+        "space_after": 4,
+        "keep_with_next": True,
+    },
+    "List Paragraph": {
+        "font_name": "Aptos",
+        "font_size": 11,
+        "left_indent": 36,
+        "space_after": 4,
+    },
+    "Caption": {
+        "font_name": "Aptos",
+        "font_size": 9,
+        "italic": True,
+        "space_after": 8,
+    },
+    "Timer": {
+        "font_name": "Aptos",
+        "font_size": 11,
+        "bold": True,
+        "font_color": "#C00000",
+        "space_before": 6,
+        "space_after": 6,
+    },
+    "Key Finding": {
+        "font_name": "Aptos",
+        "font_size": 11,
+        "bold": True,
+        "font_color": "#1F4E79",
+        "space_before": 8,
+        "space_after": 8,
+    },
+}
 
 
 def _load_result(raw: str | dict) -> dict[str, Any]:
@@ -33,6 +122,385 @@ def _dump(result: dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
+def _color_to_word(hex_color: str) -> int | None:
+    if not hex_color:
+        return None
+    c = str(hex_color).lstrip("#")
+    if len(c) != 6:
+        return None
+    try:
+        r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    except ValueError:
+        return None
+    return r + (g << 8) + (b << 16)
+
+
+def _normalize_margins(margins: dict | None) -> dict[str, float]:
+    if margins is not None and not isinstance(margins, dict):
+        raise ValueError("margins must be an object with top, bottom, left, and right values")
+    merged = dict(DEFAULT_PAGE_SETUP["margins"])
+    for key, value in (margins or {}).items():
+        if key in merged and value is not None:
+            merged[key] = float(value)
+    return merged
+
+
+def _normalize_page_setup(page_setup: dict | None) -> dict[str, Any]:
+    incoming = page_setup or {}
+    normalized = {
+        "size": (incoming.get("size") or DEFAULT_PAGE_SETUP["size"]).lower(),
+        "orientation": (incoming.get("orientation") or DEFAULT_PAGE_SETUP["orientation"]).lower(),
+        "margins": _normalize_margins(incoming.get("margins")),
+    }
+    if normalized["size"] not in PAGE_SIZES:
+        raise ValueError(f"Unsupported page size: {normalized['size']}. Use one of {sorted(PAGE_SIZES)}")
+    if normalized["orientation"] not in {"portrait", "landscape"}:
+        raise ValueError("orientation must be 'portrait' or 'landscape'")
+    return normalized
+
+
+def _normalize_blueprint(blueprint: dict | None) -> dict[str, Any]:
+    if blueprint is not None and not isinstance(blueprint, dict):
+        return {
+            "template": DEFAULT_TEMPLATE_ID,
+            "page_setup": {},
+            "properties": {},
+            "blocks": blueprint,
+        }
+    source = blueprint or {}
+    document = source.get("document") if isinstance(source.get("document"), dict) else {}
+    sections = source.get("sections")
+    if sections is None:
+        sections = document.get("sections")
+
+    raw_blocks = source.get("blocks") or []
+    blocks = list(raw_blocks) if isinstance(raw_blocks, list) else raw_blocks
+    if isinstance(blocks, list) and sections:
+        for section in sections:
+            if isinstance(section, dict):
+                blocks.extend(section.get("blocks") or [])
+
+    properties = {}
+    for container in (document, source):
+        for key in ("title", "subject", "author", "keywords", "comments", "category", "manager", "company", "last_author"):
+            if container.get(key) is not None:
+                properties[key] = container.get(key)
+        if isinstance(container.get("properties"), dict):
+            properties.update({k: v for k, v in container["properties"].items() if v is not None})
+
+    return {
+        "template": source.get("template") or document.get("template") or DEFAULT_TEMPLATE_ID,
+        "page_setup": source.get("page_setup") or document.get("page_setup") or {},
+        "properties": properties,
+        "blocks": blocks,
+    }
+
+
+def _validate_blueprint(blueprint: dict | None) -> list[str]:
+    normalized = _normalize_blueprint(blueprint)
+    errors: list[str] = []
+    try:
+        _normalize_page_setup(normalized["page_setup"])
+    except ValueError as exc:
+        errors.append(str(exc))
+
+    blocks = normalized["blocks"]
+    if not isinstance(blocks, list):
+        return ["blueprint blocks must be a list"]
+
+    for index, block in enumerate(blocks):
+        if not isinstance(block, dict):
+            errors.append(f"block {index} must be an object")
+            continue
+        block_type = block.get("type")
+        if block_type not in SUPPORTED_BLUEPRINT_BLOCKS:
+            errors.append(
+                f"block {index} has unsupported type {block_type!r}; "
+                f"use one of {sorted(SUPPORTED_BLUEPRINT_BLOCKS)}"
+            )
+            continue
+        if block_type in {"paragraph", "heading"} and block.get("text") is None:
+            errors.append(f"block {index} ({block_type}) requires text")
+        if block_type == "heading":
+            level = int(block.get("level") or 1)
+            if level < 1 or level > 3:
+                errors.append(f"block {index} heading level must be 1, 2, or 3")
+        if block_type == "list":
+            items = block.get("items")
+            if not isinstance(items, list) or not items:
+                errors.append(f"block {index} list requires a non-empty items array")
+        if block_type == "table":
+            rows = block.get("rows") or block.get("data")
+            if not isinstance(rows, list) or not rows:
+                errors.append(f"block {index} table requires non-empty rows")
+            elif not all(isinstance(row, list) for row in rows):
+                errors.append(f"block {index} table rows must be arrays")
+            else:
+                width = max(len(row) for row in rows)
+                if width == 0 or any(len(row) != width for row in rows):
+                    errors.append(f"block {index} table rows must all have the same non-zero width")
+    return errors
+
+
+def _ensure_word_style(doc, name: str, profile: dict[str, Any]) -> str | None:
+    try:
+        style = doc.Styles(name)
+    except Exception:
+        try:
+            style = doc.Styles.Add(Name=name, Type=1)  # wdStyleTypeParagraph
+        except Exception as exc:
+            return str(exc)
+
+    try:
+        font = style.Font
+        if profile.get("font_name"):
+            font.Name = profile["font_name"]
+        if profile.get("font_size") is not None:
+            font.Size = profile["font_size"]
+        if profile.get("bold") is not None:
+            font.Bold = bool(profile["bold"])
+        if profile.get("italic") is not None:
+            font.Italic = bool(profile["italic"])
+        color = _color_to_word(profile.get("font_color"))
+        if color is not None:
+            font.Color = color
+
+        paragraph = style.ParagraphFormat
+        if profile.get("space_before") is not None:
+            paragraph.SpaceBefore = profile["space_before"]
+        if profile.get("space_after") is not None:
+            paragraph.SpaceAfter = profile["space_after"]
+        if profile.get("line_spacing_rule") is not None:
+            paragraph.LineSpacingRule = profile["line_spacing_rule"]
+        if profile.get("left_indent") is not None:
+            paragraph.LeftIndent = profile["left_indent"]
+        if profile.get("keep_with_next") is not None:
+            paragraph.KeepWithNext = bool(profile["keep_with_next"])
+    except Exception as exc:
+        return str(exc)
+    return None
+
+
+def _apply_word_page_setup(doc, page_setup: dict | None) -> dict[str, Any]:
+    normalized = _normalize_page_setup(page_setup)
+    width, height = PAGE_SIZES[normalized["size"]]
+    if normalized["orientation"] == "landscape":
+        width, height = height, width
+
+    setup = doc.PageSetup
+    setup.Orientation = 1 if normalized["orientation"] == "landscape" else 0
+    setup.PageWidth = width
+    setup.PageHeight = height
+    setup.TopMargin = normalized["margins"]["top"]
+    setup.BottomMargin = normalized["margins"]["bottom"]
+    setup.LeftMargin = normalized["margins"]["left"]
+    setup.RightMargin = normalized["margins"]["right"]
+    return normalized
+
+
+def _apply_default_template_live(filename: str) -> dict[str, Any]:
+    if sys.platform != "win32":
+        return {"error": "Default template initialization is only available on Windows"}
+
+    from word_document_server.core.word_com import find_document, get_word_app, undo_record
+
+    app = get_word_app()
+    doc = find_document(app, filename)
+    style_errors: dict[str, str] = {}
+
+    with undo_record(app, "MCP: Apply Default Template"):
+        page_setup = _apply_word_page_setup(doc, DEFAULT_PAGE_SETUP)
+        for name, profile in DEFAULT_STYLE_PROFILE.items():
+            error = _ensure_word_style(doc, name, profile)
+            if error:
+                style_errors[name] = error
+
+        try:
+            props = doc.BuiltInDocumentProperties
+            if DEFAULT_AUTHOR:
+                props("Author").Value = DEFAULT_AUTHOR
+        except Exception as exc:
+            style_errors["properties"] = str(exc)
+
+    return {
+        "success": True,
+        "template": DEFAULT_TEMPLATE_ID,
+        "page_setup": page_setup,
+        "styles": list(DEFAULT_STYLE_PROFILE.keys()),
+        "style_errors": style_errors or None,
+    }
+
+
+def _resolve_com_range(doc, position: str = "end", paragraph_index: int = None):
+    if paragraph_index is not None:
+        if paragraph_index < 1 or paragraph_index > doc.Paragraphs.Count:
+            raise ValueError(f"paragraph_index {paragraph_index} out of range (1-{doc.Paragraphs.Count})")
+        start = doc.Paragraphs(paragraph_index).Range.Start
+        return doc.Range(start, start)
+    if position == "start":
+        return doc.Range(0, 0)
+    if position == "end":
+        end_pos = doc.Content.End - 1
+        return doc.Range(end_pos, end_pos)
+    try:
+        offset = int(position)
+    except Exception as exc:
+        raise ValueError("position must be 'start', 'end', or a character offset") from exc
+    return doc.Range(offset, offset)
+
+
+def _layout_page_setup_live(filename: str, page_setup: dict | None) -> dict[str, Any]:
+    if sys.platform != "win32":
+        return {"error": "Layout page setup is only available on Windows"}
+    from word_document_server.core.word_com import find_document, get_word_app, undo_record
+
+    app = get_word_app()
+    doc = find_document(app, filename)
+    with undo_record(app, "MCP: Page Setup"):
+        normalized = _apply_word_page_setup(doc, page_setup)
+    return {"success": True, "document": doc.Name, "page_setup": normalized}
+
+
+def _layout_insert_break_live(
+    filename: str,
+    break_kind: str,
+    position: str = "end",
+    paragraph_index: int = None,
+    break_type: str = "next_page",
+) -> dict[str, Any]:
+    if sys.platform != "win32":
+        return {"error": "Break insertion is only available on Windows"}
+    from word_document_server.core.word_com import find_document, get_word_app, undo_record
+
+    app = get_word_app()
+    doc = find_document(app, filename)
+    section_breaks = {
+        "next_page": 2,
+        "continuous": 3,
+        "even_page": 4,
+        "odd_page": 5,
+    }
+    if break_kind == "page":
+        word_break = 7
+    else:
+        word_break = section_breaks.get((break_type or "next_page").lower())
+        if word_break is None:
+            return {"error": f"Invalid section break_type: {break_type}", "valid_break_types": sorted(section_breaks)}
+
+    with undo_record(app, f"MCP: Insert {break_kind.title()} Break"):
+        rng = _resolve_com_range(doc, position=position, paragraph_index=paragraph_index)
+        rng.InsertBreak(Type=word_break)
+
+    return {
+        "success": True,
+        "document": doc.Name,
+        "break": break_kind,
+        "break_type": break_type if break_kind == "section" else "page",
+        "position": position,
+        "paragraph_index": paragraph_index,
+    }
+
+
+def _inspect_blueprint_live(filename: str) -> dict[str, Any]:
+    if sys.platform != "win32":
+        return {"error": "Blueprint inspection is only available on Windows"}
+
+    from word_document_server.core.word_com import find_document, get_word_app
+
+    app = get_word_app()
+    doc = find_document(app, filename)
+    setup = doc.PageSetup
+    orientation = "landscape" if int(setup.Orientation) == 1 else "portrait"
+    page_setup = {
+        "size": "custom",
+        "orientation": orientation,
+        "width": float(setup.PageWidth),
+        "height": float(setup.PageHeight),
+        "margins": {
+            "top": float(setup.TopMargin),
+            "bottom": float(setup.BottomMargin),
+            "left": float(setup.LeftMargin),
+            "right": float(setup.RightMargin),
+        },
+    }
+
+    blocks = []
+    for index in range(1, doc.Paragraphs.Count + 1):
+        para = doc.Paragraphs(index)
+        text = para.Range.Text.rstrip("\r\x07")
+        style = str(para.Style) if para.Style else "Normal"
+        block_type = "paragraph"
+        level = None
+        lowered = style.lower()
+        if lowered.startswith("heading"):
+            block_type = "heading"
+            try:
+                level = int(style.split()[-1])
+            except Exception:
+                level = 1
+        block = {"type": block_type, "text": text, "style": style, "paragraph_index": index}
+        if level is not None:
+            block["level"] = level
+        blocks.append(block)
+
+    return {
+        "success": True,
+        "session_blueprint": {
+            "template": DEFAULT_TEMPLATE_ID,
+            "document": {
+                "title": _safe_doc_property(doc, "Title"),
+                "subject": _safe_doc_property(doc, "Subject"),
+                "author": _safe_doc_property(doc, "Author"),
+                "page_setup": page_setup,
+                "stats": {
+                    "pages": doc.ComputeStatistics(2),
+                    "words": doc.ComputeStatistics(0),
+                    "paragraphs": doc.Paragraphs.Count,
+                    "tables": doc.Tables.Count,
+                    "inline_shapes": doc.InlineShapes.Count,
+                    "shapes": doc.Shapes.Count,
+                },
+                "sections": [{"blocks": blocks}],
+            },
+        },
+    }
+
+
+def _blueprint_expected_counts(blueprint: dict | None) -> dict[str, int]:
+    normalized = _normalize_blueprint(blueprint)
+    paragraphs = 0
+    tables = 0
+    image_placeholders = 0
+    if not isinstance(normalized["blocks"], list):
+        return {"paragraphs": 0, "tables": 0, "image_placeholders": 0, "blocks": 0}
+    for block in normalized["blocks"]:
+        block_type = block.get("type")
+        if block_type in {"paragraph", "heading", "image_placeholder"}:
+            paragraphs += 1
+            if block_type == "image_placeholder":
+                image_placeholders += 1
+        elif block_type == "list":
+            paragraphs += len(block.get("items") or [])
+        elif block_type == "table":
+            tables += 1
+        elif block_type in {"page_break", "section_break"}:
+            pass
+    return {
+        "paragraphs": paragraphs,
+        "tables": tables,
+        "image_placeholders": image_placeholders,
+        "blocks": len(normalized["blocks"]),
+    }
+
+
+def _safe_doc_property(doc, prop_name: str) -> str:
+    try:
+        value = doc.BuiltInDocumentProperties(prop_name).Value
+        return str(value) if value is not None else ""
+    except Exception:
+        return ""
+
+
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
@@ -44,6 +512,7 @@ def _register_session(open_result: dict[str, Any]) -> str:
         "session_id": session_id,
         "filename": filename,
         "full_path": open_result.get("full_path"),
+        "template": open_result.get("template"),
         "created_at": time.time(),
         "updated_at": time.time(),
     }
@@ -209,6 +678,10 @@ async def word_v2_open(
         result = await _attach_open_document(None if path_alias in {"", "active", "current"} else path)
     elif action == "new" or path_alias in {"new", "blank", "create", "create_new"}:
         result = _load_result(await live_tools.word_live_create_document(visible=visible))
+        if not result.get("error"):
+            template_result = _apply_default_template_live(result.get("document"))
+            result["template"] = DEFAULT_TEMPLATE_ID
+            result["template_result"] = template_result
     elif action == "open":
         result = _load_result(await live_tools.word_live_open_document(
             filename=path,
@@ -672,7 +1145,7 @@ async def word_v2_mutations(
 ) -> str:
     """Preview or apply multiple v2 operations.
 
-    Each operation is {"tool": "edit|format|comment|track_changes|table", ...args}.
+    Each operation is {"tool": "edit|format|comment|track_changes|table|layout", ...args}.
     Preview validates shape only; apply runs operations in order.
     """
     operations = operations or []
@@ -702,6 +1175,8 @@ async def word_v2_mutations(
             raw = await word_v2_track_changes(**args)
         elif tool == "table":
             raw = await word_v2_table(**args)
+        elif tool == "layout":
+            raw = await word_v2_layout(**args)
         else:
             raw = _dump({"error": f"Invalid operation tool at index {i}: {tool}"})
         result = _load_result(raw)
@@ -710,6 +1185,313 @@ async def word_v2_mutations(
             return _dump({"success": False, "session_id": session_id, "results": results})
 
     return _dump({"success": True, "session_id": session_id, "results": results})
+
+
+async def word_v2_layout(
+    session_id: str,
+    action: str,
+    page_size: str = "letter",
+    orientation: str = "portrait",
+    margins: dict = None,
+    position: str = "end",
+    paragraph_index: int = None,
+    break_type: str = "next_page",
+    title: str = None,
+    subject: str = None,
+    author: str = None,
+    keywords: str = None,
+    comments: str = None,
+    category: str = None,
+    manager: str = None,
+    company: str = None,
+    last_author: str = None,
+) -> str:
+    """Manage page setup, breaks, and document properties for a live session."""
+    action = (action or "").lower()
+    valid_actions = ["page_setup", "page_break", "section_break", "properties"]
+    if action not in valid_actions:
+        return _dump({"error": "Invalid action", "valid_actions": valid_actions})
+
+    try:
+        filename = _resolve_filename(session_id=session_id)
+    except ValueError as exc:
+        return _dump({"error": str(exc)})
+
+    if action == "page_setup":
+        try:
+            result = _layout_page_setup_live(
+                filename,
+                {
+                    "size": page_size,
+                    "orientation": orientation,
+                    "margins": margins,
+                },
+            )
+        except ValueError as exc:
+            result = {"error": str(exc)}
+    elif action == "page_break":
+        result = _layout_insert_break_live(
+            filename,
+            "page",
+            position=position,
+            paragraph_index=paragraph_index,
+        )
+    elif action == "section_break":
+        result = _layout_insert_break_live(
+            filename,
+            "section",
+            position=position,
+            paragraph_index=paragraph_index,
+            break_type=break_type,
+        )
+    else:
+        result = _load_result(await live_read_tools.word_live_set_core_properties(
+            filename=filename,
+            title=title,
+            subject=subject,
+            author=author,
+            keywords=keywords,
+            comments=comments,
+            category=category,
+            manager=manager,
+            company=company,
+            last_author=last_author,
+        ))
+
+    result["session_id"] = session_id
+    return _dump(result)
+
+
+async def _paragraph_count(session_id: str) -> int | None:
+    result = _load_result(await word_v2_get_content(session_id=session_id, action="info"))
+    if result.get("error"):
+        return None
+    value = result.get("paragraphs")
+    return int(value) if value is not None else None
+
+
+async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict[str, Any]:
+    block_type = block.get("type")
+    if block_type == "paragraph":
+        style = block.get("style") or "Normal"
+        raw = await word_v2_edit(
+            session_id=session_id,
+            action="insert_paragraphs",
+            paragraphs=[str(block.get("text") or "")],
+            position="end",
+            style=style,
+        )
+        return {"block_type": block_type, "result": _load_result(raw)}
+
+    if block_type == "heading":
+        if block.get("page_break_before"):
+            await word_v2_layout(session_id=session_id, action="page_break", position="end")
+        level = int(block.get("level") or 1)
+        style = block.get("style") or f"Heading {level}"
+        raw = await word_v2_edit(
+            session_id=session_id,
+            action="insert_paragraphs",
+            paragraphs=[str(block.get("text") or "")],
+            position="end",
+            style=style,
+        )
+        return {"block_type": block_type, "result": _load_result(raw)}
+
+    if block_type == "list":
+        items = [str(item) for item in block.get("items") or []]
+        before = await _paragraph_count(session_id)
+        raw = await word_v2_edit(
+            session_id=session_id,
+            action="insert_paragraphs",
+            paragraphs=items,
+            position="end",
+            style=block.get("style") or "List Paragraph",
+        )
+        result = _load_result(raw)
+        after = await _paragraph_count(session_id)
+        format_result = None
+        if before is not None and after is not None and after >= before + len(items):
+            list_type = "number" if block.get("ordered") else "bullet"
+            format_result = _load_result(await word_v2_format(
+                session_id=session_id,
+                action="list",
+                start_paragraph=before + 1,
+                end_paragraph=after,
+                list_type=block.get("list_type") or list_type,
+                level=int(block.get("level") or 0),
+            ))
+        return {"block_type": block_type, "result": result, "format_result": format_result}
+
+    if block_type == "table":
+        rows = block.get("rows") or block.get("data") or []
+        row_count = len(rows)
+        col_count = max(len(row) for row in rows) if rows else 0
+        raw = await word_v2_table(
+            session_id=session_id,
+            action="create",
+            rows=row_count,
+            cols=col_count,
+            position="end",
+            data=rows,
+            style=block.get("style") or "Table Grid",
+            autofit=block.get("autofit") or "window",
+        )
+        return {"block_type": block_type, "result": _load_result(raw)}
+
+    if block_type == "image_placeholder":
+        label = block.get("label") or block.get("asset_id") or "image"
+        raw = await word_v2_edit(
+            session_id=session_id,
+            action="insert_paragraphs",
+            paragraphs=[f"[Image placeholder: {label}]"],
+            position="end",
+            style=block.get("style") or "Caption",
+        )
+        return {
+            "block_type": block_type,
+            "result": _load_result(raw),
+            "warning": "image_placeholder creates editable placeholder text; real image insertion will be added in word_v2_media.",
+        }
+
+    if block_type == "page_break":
+        raw = await word_v2_layout(
+            session_id=session_id,
+            action="page_break",
+            position=block.get("position") or "end",
+            paragraph_index=block.get("paragraph_index"),
+        )
+        return {"block_type": block_type, "result": _load_result(raw)}
+
+    if block_type == "section_break":
+        raw = await word_v2_layout(
+            session_id=session_id,
+            action="section_break",
+            position=block.get("position") or "end",
+            paragraph_index=block.get("paragraph_index"),
+            break_type=block.get("break_type") or "next_page",
+        )
+        return {"block_type": block_type, "result": _load_result(raw)}
+
+    return {"block_type": block_type, "result": {"error": f"Unsupported block type: {block_type}"}}
+
+
+async def word_v2_blueprint(
+    action: str,
+    session_id: str = None,
+    blueprint: dict = None,
+    out: str = None,
+    visible: bool = True,
+) -> str:
+    """Create, inspect, validate, or export structured document blueprints."""
+    action = (action or "").lower()
+    valid_actions = ["create", "inspect", "validate", "export"]
+    if action not in valid_actions:
+        return _dump({"error": "Invalid action", "valid_actions": valid_actions})
+
+    if action in {"inspect", "export"}:
+        try:
+            filename = _resolve_filename(session_id=session_id)
+        except ValueError as exc:
+            return _dump({"error": str(exc)})
+        result = _inspect_blueprint_live(filename)
+        result["session_id"] = session_id
+        if not result.get("error") and session_id in _sessions:
+            _sessions[session_id]["blueprint"] = result.get("session_blueprint")
+        return _dump(result)
+
+    errors = _validate_blueprint(blueprint)
+    if action == "validate":
+        result = {
+            "success": not errors,
+            "errors": errors,
+            "expected": _blueprint_expected_counts(blueprint),
+        }
+        if session_id:
+            info = _load_result(await word_v2_get_content(session_id=session_id, action="info"))
+            result["current"] = {
+                "paragraphs": info.get("paragraphs"),
+                "tables": info.get("tables"),
+                "pages": info.get("pages"),
+            } if not info.get("error") else {"error": info.get("error")}
+            mismatches = []
+            expected = result["expected"]
+            current = result["current"]
+            if not current.get("error"):
+                for key in ("paragraphs", "tables"):
+                    if current.get(key) is not None and expected.get(key) != current.get(key):
+                        mismatches.append({"field": key, "expected": expected.get(key), "actual": current.get(key)})
+            result["mismatches"] = mismatches
+            result["success"] = result["success"] and not mismatches
+        return _dump(result)
+
+    if errors:
+        return _dump({"success": False, "errors": errors})
+
+    normalized = _normalize_blueprint(blueprint)
+    created = _load_result(await word_v2_open(action="new", visible=visible))
+    if created.get("error"):
+        return _dump(created)
+    new_session_id = created["session_id"]
+
+    page_setup = normalized.get("page_setup") or {}
+    if page_setup:
+        await word_v2_layout(
+            session_id=new_session_id,
+            action="page_setup",
+            page_size=page_setup.get("size") or "letter",
+            orientation=page_setup.get("orientation") or "portrait",
+            margins=page_setup.get("margins"),
+        )
+
+    properties = normalized.get("properties") or {}
+    if properties:
+        await word_v2_layout(
+            session_id=new_session_id,
+            action="properties",
+            title=properties.get("title"),
+            subject=properties.get("subject"),
+            author=properties.get("author"),
+            keywords=properties.get("keywords"),
+            comments=properties.get("comments"),
+            category=properties.get("category"),
+            manager=properties.get("manager"),
+            company=properties.get("company"),
+            last_author=properties.get("last_author"),
+        )
+
+    block_results = []
+    warnings = []
+    for index, block in enumerate(normalized["blocks"]):
+        block_result = await _apply_blueprint_block(new_session_id, block)
+        block_result["index"] = index
+        block_results.append(block_result)
+        if block_result.get("warning"):
+            warnings.append({"index": index, "warning": block_result["warning"]})
+        result = block_result.get("result") or {}
+        if result.get("error"):
+            return _dump({
+                "success": False,
+                "session_id": new_session_id,
+                "created": created,
+                "results": block_results,
+                "warnings": warnings,
+            })
+
+    save_result = None
+    if out:
+        save_result = _load_result(await word_v2_save(session_id=new_session_id, out=out))
+
+    if new_session_id in _sessions:
+        _sessions[new_session_id]["blueprint"] = normalized
+    return _dump({
+        "success": True,
+        "session_id": new_session_id,
+        "created": created,
+        "block_count": len(normalized["blocks"]),
+        "results": block_results,
+        "warnings": warnings,
+        "save_result": save_result,
+    })
 
 
 async def word_v2_protection(

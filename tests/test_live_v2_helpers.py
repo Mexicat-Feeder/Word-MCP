@@ -134,10 +134,116 @@ def test_open_action_new_explicitly_creates_blank_document(monkeypatch):
             "visible": visible,
         })
 
+    def fake_apply_template(filename):
+        return {"success": True, "template": "default_plain", "document": filename}
+
     monkeypatch.setattr(live_v2_tools.live_tools, "word_live_create_document", fake_create_document)
+    monkeypatch.setattr(live_v2_tools, "_apply_default_template_live", fake_apply_template)
 
     result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="new", visible=False)))
 
     assert result["success"] is True
     assert result["document"] == "Document1"
+    assert result["template"] == "default_plain"
+    assert result["template_result"]["success"] is True
     assert result["session_id"].startswith("word_")
+
+
+def test_blueprint_validation_rejects_unknown_blocks_and_bad_tables():
+    errors = live_v2_tools._validate_blueprint({
+        "blocks": [
+            {"type": "callout", "text": "Nope"},
+            {"type": "table", "rows": [["A"], ["B", "C"]]},
+        ],
+    })
+
+    assert any("unsupported type" in error for error in errors)
+    assert any("same non-zero width" in error for error in errors)
+
+
+def test_blueprint_expected_counts():
+    counts = live_v2_tools._blueprint_expected_counts({
+        "blocks": [
+            {"type": "heading", "text": "Title", "level": 1},
+            {"type": "paragraph", "text": "Body"},
+            {"type": "list", "items": ["One", "Two"]},
+            {"type": "table", "rows": [["A", "B"]]},
+            {"type": "image_placeholder", "label": "screen"},
+            {"type": "page_break"},
+        ],
+    })
+
+    assert counts == {
+        "paragraphs": 5,
+        "tables": 1,
+        "image_placeholders": 1,
+        "blocks": 6,
+    }
+
+
+def test_layout_invalid_action_does_not_require_session():
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_layout(session_id="missing", action="bad")))
+
+    assert result["error"] == "Invalid action"
+    assert "page_setup" in result["valid_actions"]
+
+
+def test_blueprint_create_dispatches_blocks_in_order(monkeypatch):
+    calls = []
+
+    async def fake_open(action="open", visible=True, **_kwargs):
+        calls.append(("open", action, visible))
+        session_id = live_v2_tools._register_session({
+            "document": "Document1",
+            "full_path": "",
+            "template": "default_plain",
+        })
+        return json.dumps({"success": True, "document": "Document1", "session_id": session_id})
+
+    async def fake_layout(**kwargs):
+        calls.append(("layout", kwargs["action"]))
+        return json.dumps({"success": True, "session_id": kwargs["session_id"], "action": kwargs["action"]})
+
+    async def fake_edit(**kwargs):
+        calls.append(("edit", kwargs["action"], tuple(kwargs.get("paragraphs") or []), kwargs.get("style")))
+        return json.dumps({"success": True, "session_id": kwargs["session_id"]})
+
+    async def fake_table(**kwargs):
+        calls.append(("table", kwargs["action"], kwargs["rows"], kwargs["cols"]))
+        return json.dumps({"success": True, "session_id": kwargs["session_id"]})
+
+    async def fake_get_content(session_id, action="info", **_kwargs):
+        return json.dumps({"success": True, "session_id": session_id, "paragraphs": 10, "tables": 1})
+
+    monkeypatch.setattr(live_v2_tools, "word_v2_open", fake_open)
+    monkeypatch.setattr(live_v2_tools, "word_v2_layout", fake_layout)
+    monkeypatch.setattr(live_v2_tools, "word_v2_edit", fake_edit)
+    monkeypatch.setattr(live_v2_tools, "word_v2_table", fake_table)
+    monkeypatch.setattr(live_v2_tools, "word_v2_get_content", fake_get_content)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_blueprint(
+        action="create",
+        blueprint={
+            "page_setup": {"size": "letter", "orientation": "portrait"},
+            "properties": {"title": "Demo"},
+            "blocks": [
+                {"type": "heading", "text": "Title", "level": 1},
+                {"type": "paragraph", "text": "Body"},
+                {"type": "table", "rows": [["A", "B"], ["1", "2"]]},
+                {"type": "page_break"},
+                {"type": "image_placeholder", "label": "Chart"},
+            ],
+        },
+    )))
+
+    assert result["success"] is True
+    assert calls[:5] == [
+        ("open", "new", True),
+        ("layout", "page_setup"),
+        ("layout", "properties"),
+        ("edit", "insert_paragraphs", ("Title",), "Heading 1"),
+        ("edit", "insert_paragraphs", ("Body",), "Normal"),
+    ]
+    assert ("table", "create", 2, 2) in calls
+    assert ("layout", "page_break") in calls
+    assert result["warnings"][0]["warning"].startswith("image_placeholder")

@@ -34,9 +34,10 @@ Common calls:
   `index`, `name`, or `full_path`.
 - `word_v2_open(path="contract.docx")` opens a file. Relative paths resolve
   from the server working directory or the provided `directory`.
-- `word_v2_open(action="new")` creates a blank document.
+- `word_v2_open(action="new")` creates a new document from the built-in
+  `default_plain` template profile.
 
-Do not call `word_v2_open()` when you intend to create a blank document. Use
+Do not call `word_v2_open()` when you intend to create a new document. Use
 `action="new"` so agents do not accidentally ignore a user's active document.
 
 ### `word_v2_get_content`
@@ -129,6 +130,39 @@ Actions:
 Table row and column indexes follow the underlying live COM table tools:
 generally 1-based for live table modification.
 
+### `word_v2_layout`
+
+Actions:
+
+- `page_setup`: set page size, orientation, and margins.
+- `page_break`: insert a manual page break.
+- `section_break`: insert a section break.
+- `properties`: set document properties such as title, subject, author, or company.
+
+Use this when document structure matters more than text edits alone.
+
+### `word_v2_blueprint`
+
+Actions:
+
+- `create`: create a new `default_plain` document from structured blocks.
+- `inspect`: inspect an open document into a blueprint-like structure.
+- `validate`: compare a blueprint's expected structure against a live session.
+- `export`: return the current inspected blueprint JSON.
+
+Supported first-pass block types:
+
+- `heading`: `{ "type": "heading", "text": "...", "level": 1 }`
+- `paragraph`: `{ "type": "paragraph", "text": "...", "style": "Normal" }`
+- `list`: `{ "type": "list", "items": ["One", "Two"], "ordered": false }`
+- `table`: `{ "type": "table", "rows": [["Metric", "Value"]] }`
+- `page_break`: `{ "type": "page_break" }`
+- `section_break`: `{ "type": "section_break", "break_type": "next_page" }`
+- `image_placeholder`: placeholder text until real media insertion lands.
+
+Use blueprint mode for high-fidelity generation. Use simple edit/format/table
+tools for quick spontaneous documents.
+
 ### `word_v2_mutations`
 
 Use `action="preview"` to inspect a batch shape without changing the document.
@@ -152,6 +186,8 @@ Example:
 - Always open or attach first and carry `session_id`.
 - If the user says a document is already open, start with `word_v2_open()` or
   `word_v2_open(action="list")`; do not create a blank document.
+- If the user asks for a new document, use `word_v2_open(action="new")` or
+  `word_v2_blueprint(action="create")`.
 - Search before editing unless the user gives exact `start/end`.
 - Prefer `handle` over offsets.
 - Re-search after edits because offsets can move.

@@ -18,6 +18,8 @@ EXPECTED_PUBLIC_TOOLS = {
     "word_v2_track_changes",
     "word_v2_table",
     "word_v2_mutations",
+    "word_v2_layout",
+    "word_v2_blueprint",
     "word_v2_protection",
 }
 

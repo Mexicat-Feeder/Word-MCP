@@ -396,6 +396,74 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
+            title="Word V2 Layout",
+            destructiveHint=True,
+        ),
+    )
+    async def word_v2_layout(
+        session_id: str,
+        action: str,
+        page_size: str = "letter",
+        orientation: str = "portrait",
+        margins: dict = None,
+        position: str = "end",
+        paragraph_index: int = None,
+        break_type: str = "next_page",
+        title: str = None,
+        subject: str = None,
+        author: str = None,
+        keywords: str = None,
+        comments: str = None,
+        category: str = None,
+        manager: str = None,
+        company: str = None,
+        last_author: str = None,
+    ):
+        """Manage page setup, breaks, and document properties."""
+        return await live_v2_tools.word_v2_layout(
+            session_id=session_id,
+            action=action,
+            page_size=page_size,
+            orientation=orientation,
+            margins=margins,
+            position=position,
+            paragraph_index=paragraph_index,
+            break_type=break_type,
+            title=title,
+            subject=subject,
+            author=author,
+            keywords=keywords,
+            comments=comments,
+            category=category,
+            manager=manager,
+            company=company,
+            last_author=last_author,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Word V2 Blueprint",
+            destructiveHint=True,
+        ),
+    )
+    async def word_v2_blueprint(
+        action: str,
+        session_id: str = None,
+        blueprint: dict = None,
+        out: str = None,
+        visible: bool = True,
+    ):
+        """Create, inspect, validate, or export structured document blueprints."""
+        return await live_v2_tools.word_v2_blueprint(
+            action=action,
+            session_id=session_id,
+            blueprint=blueprint,
+            out=out,
+            visible=visible,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
             title="Word V2 Protection",
             destructiveHint=True,
         ),

@@ -7,7 +7,7 @@ This branch exposes only grouped `word_v2_*` MCP tools. Lower-level
 
 | Tool | Description |
 | --- | --- |
-| `word_v2_open` | List open documents, attach to active/listed documents, open files, or create blank sessions. |
+| `word_v2_open` | List open documents, attach to active/listed documents, open files, or create default-template sessions. |
 | `word_v2_save` | Save the current session in place, save to a new file, or export PDF. |
 | `word_v2_close` | Close the Word document associated with a session. |
 
@@ -27,6 +27,8 @@ This branch exposes only grouped `word_v2_*` MCP tools. Lower-level
 | `word_v2_comment` | Create, reply to, resolve, delete, list, or get comments. |
 | `word_v2_track_changes` | Toggle, list, accept, reject, or decide tracked changes. |
 | `word_v2_table` | Create, inspect, edit, or format tables. |
+| `word_v2_layout` | Set page setup, insert page/section breaks, or set document properties. |
+| `word_v2_blueprint` | Create, inspect, validate, or export structured document blueprints. |
 | `word_v2_protection` | Protect or unprotect a document. |
 | `word_v2_mutations` | Preview or apply multiple v2 operations in order. |
 

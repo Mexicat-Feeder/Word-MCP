@@ -9,11 +9,11 @@ choosing between duplicate ways to open, read, edit, save, or close documents.
 
 ## Public Tool Surface
 
-The server registers 12 public MCP tools:
+The server registers 14 public MCP tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `word_v2_open` | List open documents, attach to an open document, open a file, or create a new live session. |
+| `word_v2_open` | List open documents, attach to an open document, open a file, or create a new default-template session. |
 | `word_v2_save` | Save in place, save as another document, or export PDF. |
 | `word_v2_close` | Close a live session. |
 | `word_v2_get_content` | Read text, page text, info, comments, revisions, or paragraph formatting. |
@@ -24,6 +24,8 @@ The server registers 12 public MCP tools:
 | `word_v2_track_changes` | Toggle, list, accept, reject, or decide revisions. |
 | `word_v2_table` | Create, inspect, edit, and format tables. |
 | `word_v2_mutations` | Preview or apply grouped v2 operations in order. |
+| `word_v2_layout` | Set page setup, insert page/section breaks, and set document properties. |
+| `word_v2_blueprint` | Create, inspect, validate, or export structured document blueprints. |
 | `word_v2_protection` | Protect or unprotect the active document. |
 
 See [LIVE_V2_AGENT_GUIDE.md](LIVE_V2_AGENT_GUIDE.md) for agent workflow and
@@ -103,6 +105,14 @@ uv run python -m word_document_server.main
 5. Edit, format, comment, or manage revisions using the same `session_id`.
 6. Save with `word_v2_save`.
 7. Close with `word_v2_close`.
+
+For spontaneous document creation, use `word_v2_open(action="new")`. New
+documents are initialized with the built-in `default_plain` template profile so
+simple edits start from consistent page setup and professional default styles.
+
+For precision document generation, use `word_v2_blueprint(action="create",
+blueprint={...})` to create from a structured block list, then validate or
+inspect with `word_v2_blueprint(action="validate"|"inspect")`.
 
 ## Development
 
