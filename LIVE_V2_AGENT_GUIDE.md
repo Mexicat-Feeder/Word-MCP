@@ -9,7 +9,8 @@ implementation details, but they are not registered as MCP tools.
 
 ## Core Workflow
 
-1. `word_v2_open(path="contract.docx")`
+1. `word_v2_open()` to attach to the active Word document, or
+   `word_v2_open(path="contract.docx")` to open a file.
 2. Keep the returned `session_id`.
 3. Read context with `word_v2_get_content(session_id, action="info")` or
    `word_v2_get_content(session_id, action="text")`.
@@ -23,10 +24,20 @@ implementation details, but they are not registered as MCP tools.
 
 ### `word_v2_open`
 
-Opens a document in Word and returns a `session_id`.
+Lists, attaches, opens, or creates Word documents.
 
-Use `path` for the document filename/path. Relative paths resolve from the
-server working directory or the provided `directory`.
+Common calls:
+
+- `word_v2_open()` attaches to the active Word document and returns `session_id`.
+- `word_v2_open(action="list")` lists open Word documents without creating a session.
+- `word_v2_open(action="attach", path="2")` attaches to a listed document by
+  `index`, `name`, or `full_path`.
+- `word_v2_open(path="contract.docx")` opens a file. Relative paths resolve
+  from the server working directory or the provided `directory`.
+- `word_v2_open(action="new")` creates a blank document.
+
+Do not call `word_v2_open()` when you intend to create a blank document. Use
+`action="new"` so agents do not accidentally ignore a user's active document.
 
 ### `word_v2_get_content`
 
@@ -91,7 +102,7 @@ Actions:
 - `list`: list comments.
 - `get`: get one comment by `comment_index`.
 
-Use `comment_text` for comment bodies.
+Use `text` for comment bodies.
 
 ### `word_v2_track_changes`
 
@@ -138,7 +149,9 @@ Example:
 
 ## Agent Rules
 
-- Always open first and carry `session_id`.
+- Always open or attach first and carry `session_id`.
+- If the user says a document is already open, start with `word_v2_open()` or
+  `word_v2_open(action="list")`; do not create a blank document.
 - Search before editing unless the user gives exact `start/end`.
 - Prefer `handle` over offsets.
 - Re-search after edits because offsets can move.

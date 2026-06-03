@@ -72,6 +72,70 @@ def _touch_session(session_id: str = None, filename: str = None, full_path: str 
     _sessions[session_id]["updated_at"] = time.time()
 
 
+def _with_session(result: dict[str, Any]) -> dict[str, Any]:
+    session_id = _register_session(result)
+    result["session_id"] = session_id
+    result["mode"] = "live_com"
+    result["next"] = [
+        "word_v2_get_content(session_id, action='info')",
+        "word_v2_search(session_id, find_text='...')",
+    ]
+    return result
+
+
+def _matches_open_document(entry: dict[str, Any], path: str) -> bool:
+    target = (path or "").strip().lower()
+    if not target:
+        return False
+
+    candidates = [
+        str(entry.get("index") or ""),
+        str(entry.get("name") or ""),
+        str(entry.get("full_path") or ""),
+    ]
+    full_path = str(entry.get("full_path") or "")
+    if full_path:
+        candidates.append(full_path.replace("\\", "/"))
+
+    return any(candidate.lower() == target for candidate in candidates if candidate)
+
+
+async def _attach_open_document(path: str = None) -> dict[str, Any]:
+    listed = _load_result(await live_read_tools.word_live_list_open())
+    if listed.get("error"):
+        return listed
+
+    documents = listed.get("documents", [])
+    if not documents:
+        return {
+            "error": "No documents are open in Word. Provide path to open a file or use action='new'.",
+            "documents": [],
+        }
+
+    selected = None
+    if path:
+        selected = next((doc for doc in documents if _matches_open_document(doc, path)), None)
+        if selected is None:
+            return {
+                "error": f"Open document not found: {path}",
+                "documents": documents,
+                "usage": "Call word_v2_open(action='list') to inspect open documents, then attach by name, full_path, or index.",
+            }
+    else:
+        selected = next((doc for doc in documents if doc.get("active")), None) or documents[0]
+
+    return {
+        "success": True,
+        "document": selected.get("name"),
+        "full_path": selected.get("full_path"),
+        "pages": selected.get("pages"),
+        "saved": selected.get("saved"),
+        "track_revisions": selected.get("track_revisions"),
+        "message": "Attached to an already-open Word document.",
+        "open_documents": documents,
+    }
+
+
 def _store_handle(session_id: str, match: dict[str, Any], index: int) -> dict[str, Any]:
     handle = f"match_{index + 1}"
     target = {
@@ -125,11 +189,27 @@ async def word_v2_open(
     visible: bool = True,
     read_only: bool = False,
     password: str | None = None,
+    action: str = "open",
 ) -> str:
-    """Open a document in Word and create a v2 live session. Spawns a blank document if path is None."""
-    if not path:
+    """Open, attach to, list, or create Word documents and return a v2 session when applicable."""
+    action = (action or "open").lower().strip()
+    path_alias = (path or "").lower().strip()
+
+    if action == "list":
+        result = _load_result(await live_read_tools.word_live_list_open())
+        if not result.get("error"):
+            result["usage"] = (
+                "Call word_v2_open() to attach to the active document, "
+                "word_v2_open(action='attach', path='<name|full_path|index>') to attach a listed document, "
+                "or word_v2_open(path='<file.docx>') to open a file."
+            )
+        return _dump(result)
+
+    if action in {"active", "attach"} or (action == "open" and path_alias in {"", "active", "current"}):
+        result = await _attach_open_document(None if path_alias in {"", "active", "current"} else path)
+    elif action == "new" or path_alias in {"new", "blank", "create", "create_new"}:
         result = _load_result(await live_tools.word_live_create_document(visible=visible))
-    else:
+    elif action == "open":
         result = _load_result(await live_tools.word_live_open_document(
             filename=path,
             directory=directory,
@@ -137,17 +217,16 @@ async def word_v2_open(
             read_only=read_only,
             password=password,
         ))
+    else:
+        return _dump({
+            "error": "Invalid action",
+            "valid_actions": ["open", "active", "attach", "list", "new"],
+        })
+
     if result.get("error"):
         return _dump(result)
 
-    session_id = _register_session(result)
-    result["session_id"] = session_id
-    result["mode"] = "live_com"
-    result["next"] = [
-        "word_v2_get_content(session_id, action='info')",
-        "word_v2_search(session_id, find_text='...')",
-    ]
-    return _dump(result)
+    return _dump(_with_session(result))
 
 
 async def word_v2_save(session_id: str, out: str = None) -> str:

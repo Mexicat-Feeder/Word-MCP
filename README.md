@@ -13,7 +13,7 @@ The server registers 12 public MCP tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `word_v2_open` | Open or create a live Word session and return `session_id`. |
+| `word_v2_open` | List open documents, attach to an open document, open a file, or create a new live session. |
 | `word_v2_save` | Save in place, save as another document, or export PDF. |
 | `word_v2_close` | Close a live session. |
 | `word_v2_get_content` | Read text, page text, info, comments, revisions, or paragraph formatting. |
@@ -95,7 +95,8 @@ uv run python -m word_document_server.main
 
 ## Typical Agent Flow
 
-1. Call `word_v2_open`.
+1. Call `word_v2_open()` to attach to the active Word document, or
+   `word_v2_open(action="list")` if you need to choose from open documents.
 2. Keep the returned `session_id`.
 3. Inspect with `word_v2_get_content`.
 4. Locate text with `word_v2_search`.

@@ -7,7 +7,7 @@ This branch exposes only grouped `word_v2_*` MCP tools. Lower-level
 
 | Tool | Description |
 | --- | --- |
-| `word_v2_open` | Open an existing document or create a blank live session. Returns `session_id`. |
+| `word_v2_open` | List open documents, attach to active/listed documents, open files, or create blank sessions. |
 | `word_v2_save` | Save the current session in place, save to a new file, or export PDF. |
 | `word_v2_close` | Close the Word document associated with a session. |
 

@@ -58,14 +58,16 @@ def register_tools() -> None:
         visible: bool = True,
         read_only: bool = False,
         password: str | None = None,
+        action: str = "open",
     ):
-        """Open a Word document in live mode and return a session_id."""
+        """Open, attach to, list, or create Word documents in live mode."""
         return await live_v2_tools.word_v2_open(
             path=path,
             directory=directory,
             visible=visible,
             read_only=read_only,
             password=password,
+            action=action,
         )
 
     @mcp.tool(

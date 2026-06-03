@@ -55,3 +55,89 @@ def test_save_requires_output_path_for_unsaved_sessions():
     result = json.loads(asyncio.run(live_v2_tools.word_v2_save(session_id)))
 
     assert "unsaved document" in result["error"]
+
+
+def test_open_without_path_attaches_active_document(monkeypatch):
+    async def fake_list_open():
+        return json.dumps({
+            "success": True,
+            "count": 2,
+            "documents": [
+                {"index": 1, "name": "Background.docx", "full_path": r"C:\Docs\Background.docx", "active": False},
+                {"index": 2, "name": "Source.docx", "full_path": r"C:\Docs\Source.docx", "active": True, "pages": 3, "saved": True},
+            ],
+        })
+
+    async def fail_create_document(**_kwargs):
+        raise AssertionError("word_v2_open() must not create a blank document when an active document exists")
+
+    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_list_open", fake_list_open)
+    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_create_document", fail_create_document)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_open()))
+
+    assert result["success"] is True
+    assert result["document"] == "Source.docx"
+    assert result["full_path"] == r"C:\Docs\Source.docx"
+    assert result["session_id"].startswith("word_")
+    assert live_v2_tools._resolve_filename(result["session_id"]) == "Source.docx"
+
+
+def test_open_action_list_returns_documents_without_session(monkeypatch):
+    async def fake_list_open():
+        return json.dumps({
+            "success": True,
+            "count": 1,
+            "documents": [
+                {"index": 1, "name": "Source.docx", "full_path": r"C:\Docs\Source.docx", "active": True},
+            ],
+        })
+
+    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_list_open", fake_list_open)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="list")))
+
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert result["documents"][0]["active"] is True
+    assert "session_id" not in result
+    assert "word_v2_open()" in result["usage"]
+
+
+def test_open_action_attach_uses_listed_document_identity(monkeypatch):
+    async def fake_list_open():
+        return json.dumps({
+            "success": True,
+            "count": 2,
+            "documents": [
+                {"index": 1, "name": "Background.docx", "full_path": r"C:\Docs\Background.docx", "active": False},
+                {"index": 2, "name": "Source.docx", "full_path": r"C:\Docs\Source.docx", "active": True},
+            ],
+        })
+
+    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_list_open", fake_list_open)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="attach", path="1")))
+
+    assert result["success"] is True
+    assert result["document"] == "Background.docx"
+    assert live_v2_tools._sessions[result["session_id"]]["full_path"] == r"C:\Docs\Background.docx"
+
+
+def test_open_action_new_explicitly_creates_blank_document(monkeypatch):
+    async def fake_create_document(visible=True):
+        return json.dumps({
+            "success": True,
+            "document": "Document1",
+            "full_path": "",
+            "message": "New blank document 'Document1' created successfully in live session",
+            "visible": visible,
+        })
+
+    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_create_document", fake_create_document)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="new", visible=False)))
+
+    assert result["success"] is True
+    assert result["document"] == "Document1"
+    assert result["session_id"].startswith("word_")
