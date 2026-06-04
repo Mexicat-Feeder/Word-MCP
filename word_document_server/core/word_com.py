@@ -10,6 +10,30 @@ import unicodedata
 from contextlib import contextmanager
 
 
+def _document_count(app) -> int:
+    try:
+        return int(app.Documents.Count)
+    except Exception:
+        return 0
+
+
+def _has_readable_documents(app) -> bool:
+    """Return True when a Word instance has at least one usable document proxy."""
+    count = _document_count(app)
+    if count == 0:
+        return False
+    for i in range(1, count + 1):
+        try:
+            doc = app.Documents(i)
+            name = str(doc.Name or "")
+            full_name = str(doc.FullName or "")
+            if name.strip() or full_name.strip():
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def get_word_app():
     """Get a reference to the running Word application via COM.
 
@@ -25,13 +49,18 @@ def get_word_app():
 
     try:
         app = win32com.client.GetActiveObject("Word.Application")
-        if app.Documents.Count > 0:
+        if _has_readable_documents(app):
             return app
-        # GetActiveObject found an empty instance — scan ROT for others
+        # GetActiveObject found an empty or unreadable instance; scan ROT for others
         app_with_docs = _find_word_with_docs()
         if app_with_docs is not None:
             return app_with_docs
-        # No instance has documents; return the empty one (caller may open a file)
+        # Reuse an empty instance, but do not reuse stale instances whose only
+        # documents are unreadable COM proxies.
+        if _document_count(app) == 0:
+            return app
+        app = win32com.client.Dispatch("Word.Application")
+        app.Visible = 0
         return app
     except Exception:
         # GetActiveObject failed entirely — try ROT scan
@@ -77,7 +106,7 @@ def _find_word_with_docs():
                 com_obj = win32com.client.Dispatch(dispatch)
                 # Direct Application entry
                 if hasattr(com_obj, "Documents") and hasattr(com_obj, "ActiveDocument"):
-                    if com_obj.Documents.Count > 0:
+                    if _has_readable_documents(com_obj):
                         return com_obj
                 # Remember file monikers for pass 2
                 if name and (name.lower().endswith(".docx") or name.lower().endswith(".doc")):
@@ -100,7 +129,7 @@ def _find_word_with_docs():
                 dispatch = obj.QueryInterface(pythoncom.IID_IDispatch)
                 doc = win32com.client.Dispatch(dispatch)
                 app = doc.Application
-                if app.Documents.Count > 0:
+                if _has_readable_documents(app):
                     return app
             except Exception:
                 continue
@@ -123,11 +152,25 @@ def find_document(app, filename: str = None):
     Raises:
         ValueError: If the document is not found or no documents are open.
     """
-    if app.Documents.Count == 0:
+    if _document_count(app) == 0:
         raise ValueError("No documents are open in Word")
 
     if not filename:
-        return app.ActiveDocument
+        try:
+            active = app.ActiveDocument
+            # Force simple property access so unreadable active proxies are not
+            # returned to callers that will immediately fail on doc.Name.
+            _ = active.Name
+            return active
+        except Exception:
+            for i in range(1, _document_count(app) + 1):
+                try:
+                    doc = app.Documents(i)
+                    _ = doc.Name
+                    return doc
+                except Exception:
+                    continue
+            raise ValueError("No readable documents are open in Word")
 
     target_basename = unicodedata.normalize('NFC', os.path.basename(filename)).lower()
     target_fullpath = (
@@ -135,14 +178,21 @@ def find_document(app, filename: str = None):
         if os.path.isabs(filename) else None
     )
 
-    for i in range(1, app.Documents.Count + 1):
-        doc = app.Documents(i)
-        if unicodedata.normalize('NFC', doc.Name).lower() == target_basename:
+    open_docs = []
+    for i in range(1, _document_count(app) + 1):
+        try:
+            doc = app.Documents(i)
+            doc_name = str(doc.Name or "")
+            doc_fullname = str(doc.FullName or "")
+        except Exception:
+            open_docs.append(f"<unreadable:{i}>")
+            continue
+        open_docs.append(doc_name or doc_fullname or f"<unnamed:{i}>")
+        if unicodedata.normalize('NFC', doc_name).lower() == target_basename:
             return doc
-        if target_fullpath and unicodedata.normalize('NFC', os.path.normpath(doc.FullName)).lower() == target_fullpath:
+        if target_fullpath and unicodedata.normalize('NFC', os.path.normpath(doc_fullname)).lower() == target_fullpath:
             return doc
 
-    open_docs = [app.Documents(i).Name for i in range(1, app.Documents.Count + 1)]
     raise ValueError(
         f"Document '{filename}' is not open in Word. "
         f"Open documents: {open_docs}"

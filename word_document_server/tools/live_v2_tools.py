@@ -8,9 +8,12 @@ so v2 can improve tool ergonomics without rewriting Word automation logic.
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from word_document_server.defaults import DEFAULT_AUTHOR
@@ -22,14 +25,21 @@ _handles: dict[str, dict[str, dict[str, Any]]] = {}
 
 DEFAULT_TEMPLATE_ID = "default_plain"
 SUPPORTED_BLUEPRINT_BLOCKS = {
+    "title_page",
+    "toc",
     "paragraph",
     "heading",
     "list",
     "table",
+    "image",
     "image_placeholder",
     "page_break",
     "section_break",
 }
+
+WD_ACTIVE_END_PAGE_NUMBER = 3
+EMU_PER_POINT = 12700
+IMAGE_EXTENSIONS = {".bmp", ".dib", ".emf", ".gif", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".wmf"}
 
 PAGE_SIZES = {
     "letter": (612, 792),
@@ -135,6 +145,168 @@ def _color_to_word(hex_color: str) -> int | None:
     return r + (g << 8) + (b << 16)
 
 
+def _natural_sort_key(value: str | os.PathLike) -> list[Any]:
+    text = str(value)
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", text)]
+
+
+def _asset_paths(asset_dir: str | None) -> list[str]:
+    if not asset_dir:
+        return []
+    root = Path(asset_dir)
+    if not root.exists():
+        return []
+    files = [
+        path
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+    ]
+    return [str(path) for path in sorted(files, key=lambda path: _natural_sort_key(path.name))]
+
+
+def _asset_sequence_key(value: str | os.PathLike) -> list[Any]:
+    name = Path(value).name
+    numbers = [int(part) for part in re.findall(r"\d+", name)]
+    return [numbers[0] if numbers else 999999, *_natural_sort_key(name)]
+
+
+def _split_asset_paths(asset_paths: list[str]) -> tuple[list[str], list[str]]:
+    title_assets = [
+        path for path in asset_paths
+        if "title" in Path(path).stem.lower()
+    ]
+    title_set = set(title_assets)
+    body_assets = [path for path in asset_paths if path not in title_set]
+    return sorted(title_assets, key=_asset_sequence_key), body_assets
+
+
+def _shape_points(value: Any) -> float | None:
+    try:
+        return round(float(value), 1)
+    except Exception:
+        return None
+
+
+def _shape_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _safe_attr(obj: Any, name: str, default: Any = None) -> Any:
+    try:
+        return getattr(obj, name)
+    except Exception:
+        return default
+
+
+def _word_alignment_name(value: int | None) -> str | None:
+    return {0: "left", 1: "center", 2: "right", 3: "justify"}.get(value)
+
+
+def _word_wrap_name(value: int | None) -> str:
+    return {
+        0: "square",
+        1: "tight",
+        2: "topbottom",
+        3: "behind",
+        4: "infront",
+    }.get(value, "inline")
+
+
+def _blueprint_list_format(numbering: dict | None) -> dict[str, Any] | None:
+    if not isinstance(numbering, dict) or numbering.get("kind") != "word_list":
+        return None
+    marker = str(numbering.get("list_string") or "").strip()
+    level = numbering.get("level")
+    try:
+        zero_based_level = max(0, int(level) - 1)
+    except Exception:
+        zero_based_level = 0
+    list_type = "bullet"
+    if any(char.isdigit() for char in marker) or marker[:1].isalpha():
+        list_type = "number"
+    try:
+        list_value = int(numbering.get("list_value") or 1)
+    except Exception:
+        list_value = 1
+    return {
+        "list_type": list_type,
+        "level": zero_based_level,
+        "continue_previous": list_value > 1,
+    }
+
+
+def _range_page(rng) -> int | None:
+    try:
+        return int(rng.Information(WD_ACTIVE_END_PAGE_NUMBER))
+    except Exception:
+        return None
+
+
+def _range_start(rng) -> int:
+    try:
+        return int(rng.Start)
+    except Exception:
+        return 0
+
+
+def _safe_style_name(style: Any) -> str:
+    try:
+        return str(style) if style else "Normal"
+    except Exception:
+        return "Normal"
+
+
+def _page_role(page: int, first_body_page: int | None, toc_pages: set[int]) -> str:
+    if first_body_page and page < first_body_page:
+        if page == 1:
+            return "title_page"
+        if page in toc_pages or page == first_body_page - 1:
+            return "toc"
+        return "front_matter"
+    if page in toc_pages:
+        return "toc"
+    return "body"
+
+
+def _assign_page_roles(pages: list[dict[str, Any]], first_body_page: int | None, toc_pages: set[int]) -> None:
+    for page in pages:
+        page["role"] = _page_role(page["page"], first_body_page, toc_pages)
+
+
+def _infer_numbering(text: str, style: str, para=None) -> dict[str, Any]:
+    clean = (text or "").strip()
+    if para is not None:
+        try:
+            list_format = para.Range.ListFormat
+            list_type = int(list_format.ListType)
+            if list_type:
+                return {
+                    "kind": "word_list",
+                    "list_type": list_type,
+                    "level": int(list_format.ListLevelNumber),
+                    "list_string": str(list_format.ListString),
+                    "list_value": int(list_format.ListValue),
+                }
+        except Exception:
+            pass
+
+    literal = re.match(r"^(\d+(?:\.\d+)*\.?)\s+\S", clean)
+    if literal and style.lower().startswith("heading"):
+        return {"kind": "literal", "value": literal.group(1).rstrip(".")}
+    if literal and style.lower() in {"normal", "normalordirect", "list paragraph", "listparagraph"}:
+        return {"kind": "literal", "value": literal.group(1).rstrip(".")}
+    return {"kind": "none"}
+
+
+def _looks_like_toc(style: str, text: str) -> bool:
+    lowered_style = (style or "").replace(" ", "").lower()
+    lowered_text = (text or "").strip().lower()
+    return lowered_style.startswith("toc") or lowered_text == "table of contents"
+
+
 def _normalize_margins(margins: dict | None) -> dict[str, float]:
     if margins is not None and not isinstance(margins, dict):
         raise ValueError("margins must be an object with top, bottom, left, and right values")
@@ -152,8 +324,11 @@ def _normalize_page_setup(page_setup: dict | None) -> dict[str, Any]:
         "orientation": (incoming.get("orientation") or DEFAULT_PAGE_SETUP["orientation"]).lower(),
         "margins": _normalize_margins(incoming.get("margins")),
     }
-    if normalized["size"] not in PAGE_SIZES:
-        raise ValueError(f"Unsupported page size: {normalized['size']}. Use one of {sorted(PAGE_SIZES)}")
+    if normalized["size"] == "custom":
+        normalized["width"] = float(incoming.get("width") or PAGE_SIZES[DEFAULT_PAGE_SETUP["size"]][0])
+        normalized["height"] = float(incoming.get("height") or PAGE_SIZES[DEFAULT_PAGE_SETUP["size"]][1])
+    elif normalized["size"] not in PAGE_SIZES:
+        raise ValueError(f"Unsupported page size: {normalized['size']}. Use one of {sorted([*PAGE_SIZES, 'custom'])}")
     if normalized["orientation"] not in {"portrait", "landscape"}:
         raise ValueError("orientation must be 'portrait' or 'landscape'")
     return normalized
@@ -172,13 +347,25 @@ def _normalize_blueprint(blueprint: dict | None) -> dict[str, Any]:
     sections = source.get("sections")
     if sections is None:
         sections = document.get("sections")
+    pages = source.get("pages")
+    if pages is None:
+        pages = document.get("pages")
 
-    raw_blocks = source.get("blocks") or []
+    raw_blocks = source.get("blocks")
+    if raw_blocks is None:
+        raw_blocks = document.get("blocks")
+    has_explicit_blocks = raw_blocks is not None
+    if raw_blocks is None:
+        raw_blocks = []
     blocks = list(raw_blocks) if isinstance(raw_blocks, list) else raw_blocks
-    if isinstance(blocks, list) and sections:
+    if isinstance(blocks, list) and not has_explicit_blocks and sections:
         for section in sections:
             if isinstance(section, dict):
                 blocks.extend(section.get("blocks") or [])
+    if isinstance(blocks, list) and not has_explicit_blocks and pages:
+        for page in pages:
+            if isinstance(page, dict):
+                blocks.extend(page.get("blocks") or [])
 
     properties = {}
     for container in (document, source):
@@ -225,6 +412,15 @@ def _validate_blueprint(blueprint: dict | None) -> list[str]:
             level = int(block.get("level") or 1)
             if level < 1 or level > 3:
                 errors.append(f"block {index} heading level must be 1, 2, or 3")
+        if block_type == "title_page":
+            title = block.get("title") or block.get("text")
+            images = block.get("images")
+            if title is None and images is not None and not isinstance(images, list):
+                errors.append(f"block {index} title_page images must be an array")
+        if block_type == "toc":
+            levels = int(block.get("levels") or 3)
+            if levels < 1 or levels > 9:
+                errors.append(f"block {index} toc levels must be between 1 and 9")
         if block_type == "list":
             items = block.get("items")
             if not isinstance(items, list) or not items:
@@ -239,6 +435,9 @@ def _validate_blueprint(blueprint: dict | None) -> list[str]:
                 width = max(len(row) for row in rows)
                 if width == 0 or any(len(row) != width for row in rows):
                     errors.append(f"block {index} table rows must all have the same non-zero width")
+        if block_type == "image":
+            if not block.get("path"):
+                errors.append(f"block {index} image requires path")
     return errors
 
 
@@ -283,7 +482,10 @@ def _ensure_word_style(doc, name: str, profile: dict[str, Any]) -> str | None:
 
 def _apply_word_page_setup(doc, page_setup: dict | None) -> dict[str, Any]:
     normalized = _normalize_page_setup(page_setup)
-    width, height = PAGE_SIZES[normalized["size"]]
+    if normalized["size"] == "custom":
+        width, height = normalized["width"], normalized["height"]
+    else:
+        width, height = PAGE_SIZES[normalized["size"]]
     if normalized["orientation"] == "landscape":
         width, height = height, width
 
@@ -401,7 +603,417 @@ def _layout_insert_break_live(
     }
 
 
-def _inspect_blueprint_live(filename: str) -> dict[str, Any]:
+def _insert_toc_live(
+    filename: str,
+    title: str = "Table of Contents",
+    levels: int = 3,
+    page_break_after: bool = True,
+) -> dict[str, Any]:
+    if sys.platform != "win32":
+        return {"error": "TOC insertion is only available on Windows"}
+    from word_document_server.core.word_com import find_document, get_word_app, undo_record
+
+    app = get_word_app()
+    doc = find_document(app, filename)
+    with undo_record(app, "MCP: Insert TOC"):
+        rng = doc.Range()
+        rng.Collapse(0)
+        if title:
+            rng.InsertAfter(f"{title}\r")
+            title_start = max(0, rng.End - len(title) - 1)
+            try:
+                doc.Range(title_start, title_start + len(title)).Style = "TOC Heading"
+            except Exception:
+                pass
+            rng = doc.Range(rng.End, rng.End)
+        toc = doc.TablesOfContents.Add(
+            Range=rng,
+            UseHeadingStyles=True,
+            UpperHeadingLevel=1,
+            LowerHeadingLevel=int(levels),
+            IncludePageNumbers=True,
+            RightAlignPageNumbers=True,
+            UseHyperlinks=True,
+        )
+        try:
+            toc.Update()
+        except Exception:
+            pass
+        if page_break_after:
+            after = doc.Range(toc.Range.End, toc.Range.End)
+            after.InsertBreak(Type=7)
+
+    return {
+        "success": True,
+        "document": doc.Name,
+        "title": title,
+        "levels": int(levels),
+        "page_break_after": page_break_after,
+    }
+
+
+def _update_tocs_live(filename: str) -> dict[str, Any]:
+    if sys.platform != "win32":
+        return {"error": "TOC update is only available on Windows"}
+    from word_document_server.core.word_com import find_document, get_word_app
+
+    app = get_word_app()
+    doc = find_document(app, filename)
+    updated = 0
+    for index in range(1, doc.TablesOfContents.Count + 1):
+        try:
+            doc.TablesOfContents(index).Update()
+            updated += 1
+        except Exception:
+            continue
+    try:
+        doc.Fields.Update()
+    except Exception:
+        pass
+    return {"success": True, "document": doc.Name, "updated_tocs": updated}
+
+
+def _paragraph_index_for_range(rng, paragraph_ranges: list[tuple[int, int, int]]) -> int | None:
+    start = _range_start(rng)
+    for index, para_start, para_end in paragraph_ranges:
+        if para_start <= start <= para_end:
+            return index
+    return None
+
+
+def _inspect_tables_live(doc, paragraph_ranges: list[tuple[int, int, int]]) -> list[dict[str, Any]]:
+    tables: list[dict[str, Any]] = []
+    for table_index in range(1, doc.Tables.Count + 1):
+        try:
+            table = doc.Tables(table_index)
+            rng = table.Range
+            row_count = int(table.Rows.Count)
+            col_count = int(table.Columns.Count)
+            rows = []
+            for row in range(1, row_count + 1):
+                values = []
+                for col in range(1, col_count + 1):
+                    try:
+                        values.append(str(table.Cell(row, col).Range.Text).rstrip("\r\x07"))
+                    except Exception:
+                        values.append("")
+                rows.append(values)
+            tables.append({
+                "type": "table",
+                "table_index": table_index,
+                "page": _range_page(rng),
+                "paragraph_index": _paragraph_index_for_range(rng, paragraph_ranges),
+                "range_start": _range_start(rng),
+                "rows": rows,
+                "row_count": row_count,
+                "col_count": col_count,
+                "style": _safe_style_name(getattr(table, "Style", None)),
+            })
+        except Exception as exc:
+            tables.append({"type": "table", "table_index": table_index, "error": str(exc)})
+    return tables
+
+
+def _inspect_inline_images_live(doc, paragraph_ranges: list[tuple[int, int, int]]) -> list[dict[str, Any]]:
+    images: list[dict[str, Any]] = []
+    for image_index in range(1, doc.InlineShapes.Count + 1):
+        try:
+            shape = doc.InlineShapes(image_index)
+            rng = shape.Range
+            try:
+                alignment = int(rng.ParagraphFormat.Alignment)
+            except Exception:
+                alignment = None
+            title = _safe_attr(shape, "Title", "") or f"InlineShape {image_index}"
+            images.append({
+                "type": "image",
+                "image_index": image_index,
+                "source": "inline",
+                "name": title,
+                "page": _range_page(rng),
+                "paragraph_index": _paragraph_index_for_range(rng, paragraph_ranges),
+                "range_start": _range_start(rng),
+                "width_pt": _shape_points(_safe_attr(shape, "Width")),
+                "height_pt": _shape_points(_safe_attr(shape, "Height")),
+                "wrapping": "inline",
+                "alignment": _word_alignment_name(alignment),
+                "paragraph_after": True,
+            })
+        except Exception as exc:
+            images.append({"type": "image", "image_index": image_index, "source": "inline", "error": str(exc)})
+    return images
+
+
+def _inspect_shape_text(shape) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    text_frame = _safe_attr(shape, "TextFrame")
+    if text_frame is None:
+        return result
+    try:
+        has_text = bool(int(_safe_attr(text_frame, "HasText", 0)))
+    except Exception:
+        has_text = False
+    result["has_text"] = has_text
+    if not has_text:
+        return result
+    text_range = _safe_attr(text_frame, "TextRange")
+    if text_range is None:
+        return result
+    text = str(_safe_attr(text_range, "Text", "") or "").rstrip("\r\x07")
+    result["text"] = text
+    font = _safe_attr(text_range, "Font")
+    if font is not None:
+        result["font_name"] = str(_safe_attr(font, "Name", "") or "") or None
+        result["font_size"] = _shape_points(_safe_attr(font, "Size"))
+        result["bold"] = _shape_int(_safe_attr(font, "Bold"))
+        result["font_color"] = _shape_int(_safe_attr(font, "Color"))
+    return result
+
+
+def _inspect_shape_visuals(shape) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    fill = _safe_attr(shape, "Fill")
+    if fill is not None:
+        result["fill_visible"] = _shape_int(_safe_attr(fill, "Visible"))
+        fore_color = _safe_attr(fill, "ForeColor")
+        result["fill_color"] = _shape_int(_safe_attr(fore_color, "RGB"))
+    line = _safe_attr(shape, "Line")
+    if line is not None:
+        result["line_visible"] = _shape_int(_safe_attr(line, "Visible"))
+        fore_color = _safe_attr(line, "ForeColor")
+        result["line_color"] = _shape_int(_safe_attr(fore_color, "RGB"))
+        result["line_weight"] = _shape_points(_safe_attr(line, "Weight"))
+    return result
+
+
+def _inspect_shapes_live(doc, paragraph_ranges: list[tuple[int, int, int]]) -> list[dict[str, Any]]:
+    shapes: list[dict[str, Any]] = []
+    for shape_index in range(1, doc.Shapes.Count + 1):
+        try:
+            shape = doc.Shapes(shape_index)
+            anchor = _safe_attr(shape, "Anchor")
+            wrap_format = _safe_attr(shape, "WrapFormat")
+            name = str(_safe_attr(shape, "Name", "") or f"Shape {shape_index}")
+            record = {
+                "type": "shape",
+                "shape_index": shape_index,
+                "name": name,
+                "page": _range_page(anchor) if anchor is not None else None,
+                "paragraph_index": _paragraph_index_for_range(anchor, paragraph_ranges) if anchor is not None else None,
+                "range_start": _range_start(anchor) if anchor is not None else None,
+                "width_pt": _shape_points(_safe_attr(shape, "Width")),
+                "height_pt": _shape_points(_safe_attr(shape, "Height")),
+                "left_pt": _shape_points(_safe_attr(shape, "Left")),
+                "top_pt": _shape_points(_safe_attr(shape, "Top")),
+                "shape_type": _shape_int(_safe_attr(shape, "Type")),
+                "auto_shape_type": _shape_int(_safe_attr(shape, "AutoShapeType")),
+                "wrap_type": _shape_int(_safe_attr(wrap_format, "Type")),
+                "relative_horizontal_position": _shape_int(_safe_attr(shape, "RelativeHorizontalPosition")),
+                "relative_vertical_position": _shape_int(_safe_attr(shape, "RelativeVerticalPosition")),
+            }
+            record.update(_inspect_shape_text(shape))
+            record.update(_inspect_shape_visuals(shape))
+            if anchor is None:
+                record["anchor_missing"] = True
+            shapes.append(record)
+        except Exception as exc:
+            shapes.append({"type": "shape", "shape_index": shape_index, "error": str(exc)})
+    return shapes
+
+
+def _picture_shapes_as_images(shapes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    images: list[dict[str, Any]] = []
+    for shape in shapes:
+        name = str(shape.get("name") or "")
+        is_picture = shape.get("shape_type") == 13 or name.lower().startswith("picture")
+        if shape.get("error") or not is_picture:
+            continue
+        wrap_type = shape.get("wrap_type")
+        images.append({
+            "type": "image",
+            "image_index": shape.get("shape_index"),
+            "source": "floating_shape",
+            "name": shape.get("name"),
+            "page": shape.get("page"),
+            "paragraph_index": shape.get("paragraph_index"),
+            "range_start": shape.get("range_start") or 0,
+            "width_pt": shape.get("width_pt"),
+            "height_pt": shape.get("height_pt"),
+            "wrapping": _word_wrap_name(wrap_type),
+            "wrap_type": wrap_type,
+            "left_pt": shape.get("left_pt"),
+            "top_pt": shape.get("top_pt"),
+            "relative_horizontal_position": shape.get("relative_horizontal_position"),
+            "relative_vertical_position": shape.get("relative_vertical_position"),
+            "paragraph_after": True,
+        })
+    return images
+
+
+def _is_replayable_title_shape(shape: dict[str, Any]) -> bool:
+    name = str(shape.get("name") or "").lower()
+    return bool(shape.get("text")) or name.startswith("text box") or name.startswith("rectangle") or shape.get("auto_shape_type") == 1
+
+
+def _is_picture_shape(shape: dict[str, Any]) -> bool:
+    name = str(shape.get("name") or "").lower()
+    return shape.get("shape_type") == 13 or name.startswith("picture")
+
+
+def _map_assets_to_body_images(
+    images: list[dict[str, Any]],
+    asset_paths: list[str],
+    first_body_page: int | None,
+    toc_pages: set[int],
+) -> list[str]:
+    warnings: list[str] = []
+    body_images = [
+        image for image in images
+        if not image.get("error")
+        and _page_role(int(image.get("page") or 0), first_body_page, toc_pages) == "body"
+    ]
+    body_images.sort(key=lambda item: (item.get("page") or 0, item.get("range_start") or 0, item.get("image_index") or 0))
+    for image, asset_path in zip(body_images, asset_paths):
+        image["asset_path"] = asset_path
+        image["path"] = asset_path
+    if asset_paths and len(asset_paths) != len(body_images):
+        warnings.append(
+            f"asset_dir contains {len(asset_paths)} images but reference inspection found {len(body_images)} body images"
+        )
+    return warnings
+
+
+def _map_assets_to_title_images(
+    images: list[dict[str, Any]],
+    asset_paths: list[str],
+    first_body_page: int | None,
+    toc_pages: set[int],
+) -> list[str]:
+    warnings: list[str] = []
+    title_images = [
+        image for image in images
+        if not image.get("error")
+        and _page_role(int(image.get("page") or 0), first_body_page, toc_pages) == "title_page"
+    ]
+    title_images.sort(key=lambda item: (item.get("range_start") or 0, item.get("image_index") or 0))
+    for image, asset_path in zip(title_images, asset_paths):
+        image["asset_path"] = asset_path
+        image["path"] = asset_path
+    if asset_paths and len(asset_paths) != len(title_images):
+        warnings.append(
+            f"asset_dir contains {len(asset_paths)} title images but reference inspection found {len(title_images)} title-page picture shapes"
+        )
+    return warnings
+
+
+def _build_page_blueprint(
+    paragraph_records: list[dict[str, Any]],
+    image_records: list[dict[str, Any]],
+    table_records: list[dict[str, Any]],
+    shape_records: list[dict[str, Any]],
+    page_count: int,
+    first_body_page: int | None,
+    toc_pages: set[int],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    pages = [{"page": page, "role": "body", "blocks": []} for page in range(1, page_count + 1)]
+    _assign_page_roles(pages, first_body_page, toc_pages)
+    page_by_number = {page["page"]: page for page in pages}
+    warnings: list[str] = []
+    flow_items: list[tuple[int, int, int, dict[str, Any]]] = []
+
+    title_shapes = [shape for shape in shape_records if shape.get("page") == 1 and not shape.get("error")]
+    title_images = [image for image in image_records if image.get("page") == 1 and not image.get("error")]
+    title_text = " ".join(
+        record["text"] for record in paragraph_records
+        if record.get("page") == 1 and record.get("text") and record.get("text") != "\f"
+    ).strip()
+    if pages and pages[0]["role"] == "title_page":
+        flow_items.append((
+            1,
+            0,
+            0,
+            {
+                "type": "title_page",
+                "page": 1,
+                "role": "title_page",
+                "text": title_text,
+                "shapes": title_shapes,
+                "images": title_images,
+                "page_break_after": True,
+                "fidelity": "inspected_only",
+            },
+        ))
+        unsupported_title_shapes = [
+            shape for shape in title_shapes
+            if not _is_replayable_title_shape(shape) and not _is_picture_shape(shape)
+        ]
+        unmapped_title_images = [image for image in title_images if not image.get("path")]
+        if unsupported_title_shapes or unmapped_title_images:
+            warnings.append("title_page contains pictures or unsupported decorative shapes without mapped assets; creation remains approximate")
+
+    toc_added_pages: set[int] = set()
+    for record in paragraph_records:
+        page = int(record.get("page") or 1)
+        role = _page_role(page, first_body_page, toc_pages)
+        if role == "title_page":
+            continue
+        text = record.get("text") or ""
+        style = record.get("style") or "Normal"
+        if text == "\f":
+            flow_items.append((page, record.get("range_start") or 0, 0, {
+                "type": "page_break",
+                "page": page,
+                "source": "reference",
+            }))
+            continue
+        if role == "toc" and _looks_like_toc(style, text):
+            if page not in toc_added_pages:
+                flow_items.append((page, record.get("range_start") or 0, 0, {
+                    "type": "toc",
+                    "page": page,
+                    "role": "toc",
+                    "title": "Table of Contents",
+                    "levels": 3,
+                    "page_break_after": True,
+                }))
+                toc_added_pages.add(page)
+            continue
+
+        block = {k: v for k, v in record.items() if k not in {"range_start", "in_table"}}
+        flow_items.append((page, record.get("range_start") or 0, 0, block))
+
+    for table in table_records:
+        if table.get("error"):
+            warnings.append(f"table {table.get('table_index')} could not be inspected: {table.get('error')}")
+            continue
+        page = int(table.get("page") or 1)
+        block = {k: v for k, v in table.items() if k not in {"range_start"}}
+        flow_items.append((page, table.get("range_start") or 0, 1, block))
+
+    for image in image_records:
+        if image.get("error"):
+            warnings.append(f"image {image.get('image_index')} could not be inspected: {image.get('error')}")
+            continue
+        page = int(image.get("page") or 1)
+        if _page_role(page, first_body_page, toc_pages) == "title_page":
+            continue
+        block = {k: v for k, v in image.items() if k not in {"range_start", "source"}}
+        if block.get("paragraph_index") is not None:
+            block["anchor_paragraph_index"] = block.pop("paragraph_index")
+        flow_items.append((page, image.get("range_start") or 0, 2, block))
+
+    flow_items.sort(key=lambda item: (item[0], item[1], item[2]))
+    blocks = [item[3] for item in flow_items]
+    for page, _, _, block in flow_items:
+        if page not in page_by_number:
+            page_by_number[page] = {"page": page, "role": _page_role(page, first_body_page, toc_pages), "blocks": []}
+            pages.append(page_by_number[page])
+        page_by_number[page]["blocks"].append(block)
+
+    return sorted(pages, key=lambda item: item["page"]), blocks, warnings
+
+
+def _inspect_blueprint_live(filename: str, asset_dir: str = None) -> dict[str, Any]:
     if sys.platform != "win32":
         return {"error": "Blueprint inspection is only available on Windows"}
 
@@ -424,11 +1036,34 @@ def _inspect_blueprint_live(filename: str) -> dict[str, Any]:
         },
     }
 
-    blocks = []
+    paragraph_records: list[dict[str, Any]] = []
+    paragraph_ranges: list[tuple[int, int, int]] = []
+    first_body_page = None
+    toc_pages: set[int] = set()
+
     for index in range(1, doc.Paragraphs.Count + 1):
         para = doc.Paragraphs(index)
         text = para.Range.Text.rstrip("\r\x07")
-        style = str(para.Style) if para.Style else "Normal"
+        style = _safe_style_name(para.Style)
+        page = _range_page(para.Range)
+        range_start = _range_start(para.Range)
+        try:
+            range_end = int(para.Range.End)
+        except Exception:
+            range_end = range_start
+        paragraph_ranges.append((index, range_start, range_end))
+        in_table = False
+        try:
+            in_table = bool(para.Range.Tables.Count)
+        except Exception:
+            in_table = False
+
+        if page and _looks_like_toc(style, text):
+            toc_pages.add(page)
+        if page and first_body_page is None and style.replace(" ", "").lower().startswith("heading1"):
+            if re.match(r"^\s*1(?:\.|\s)", text or ""):
+                first_body_page = page
+
         block_type = "paragraph"
         level = None
         lowered = style.lower()
@@ -438,10 +1073,53 @@ def _inspect_blueprint_live(filename: str) -> dict[str, Any]:
                 level = int(style.split()[-1])
             except Exception:
                 level = 1
-        block = {"type": block_type, "text": text, "style": style, "paragraph_index": index}
+        if text == "\f":
+            block_type = "page_break"
+        block = {
+            "type": block_type,
+            "text": text,
+            "style": style,
+            "page": page,
+            "paragraph_index": index,
+            "range_start": range_start,
+            "in_table": in_table,
+        }
         if level is not None:
             block["level"] = level
-        blocks.append(block)
+        if block_type in {"heading", "paragraph"}:
+            block["numbering"] = _infer_numbering(text, style, para)
+        if not in_table or block_type == "page_break":
+            paragraph_records.append(block)
+
+    page_count = int(doc.ComputeStatistics(2))
+    if first_body_page is None:
+        for record in paragraph_records:
+            if (
+                record.get("page")
+                and record.get("type") == "heading"
+                and not _looks_like_toc(record.get("style"), record.get("text"))
+            ):
+                first_body_page = int(record["page"])
+                break
+
+    shapes = _inspect_shapes_live(doc, paragraph_ranges)
+    tables = _inspect_tables_live(doc, paragraph_ranges)
+    images = _inspect_inline_images_live(doc, paragraph_ranges) + _picture_shapes_as_images(shapes)
+    asset_paths = _asset_paths(asset_dir)
+    title_asset_paths, body_asset_paths = _split_asset_paths(asset_paths)
+    warnings = _map_assets_to_title_images(images, title_asset_paths, first_body_page, toc_pages)
+    warnings.extend(_map_assets_to_body_images(images, body_asset_paths, first_body_page, toc_pages))
+    images.sort(key=lambda item: (item.get("page") or 0, item.get("range_start") or 0, item.get("source") or "", item.get("image_index") or 0))
+    pages, blocks, page_warnings = _build_page_blueprint(
+        paragraph_records,
+        images,
+        tables,
+        shapes,
+        page_count,
+        first_body_page,
+        toc_pages,
+    )
+    warnings.extend(page_warnings)
 
     return {
         "success": True,
@@ -453,16 +1131,31 @@ def _inspect_blueprint_live(filename: str) -> dict[str, Any]:
                 "author": _safe_doc_property(doc, "Author"),
                 "page_setup": page_setup,
                 "stats": {
-                    "pages": doc.ComputeStatistics(2),
+                    "pages": page_count,
                     "words": doc.ComputeStatistics(0),
                     "paragraphs": doc.Paragraphs.Count,
                     "tables": doc.Tables.Count,
                     "inline_shapes": doc.InlineShapes.Count,
                     "shapes": doc.Shapes.Count,
                 },
+                "reference": {
+                    "asset_dir": asset_dir,
+                    "asset_count": len(asset_paths),
+                    "title_asset_count": len(title_asset_paths),
+                    "body_asset_count": len(body_asset_paths),
+                    "first_body_page": first_body_page,
+                    "toc_pages": sorted(toc_pages),
+                },
+                "pages": pages,
+                "blocks": blocks,
+                "images": images,
+                "tables": tables,
+                "shapes": shapes,
+                "warnings": warnings,
                 "sections": [{"blocks": blocks}],
             },
         },
+        "warnings": warnings,
     }
 
 
@@ -470,15 +1163,23 @@ def _blueprint_expected_counts(blueprint: dict | None) -> dict[str, int]:
     normalized = _normalize_blueprint(blueprint)
     paragraphs = 0
     tables = 0
+    images = 0
     image_placeholders = 0
     if not isinstance(normalized["blocks"], list):
-        return {"paragraphs": 0, "tables": 0, "image_placeholders": 0, "blocks": 0}
+        return {"paragraphs": 0, "tables": 0, "images": 0, "image_placeholders": 0, "blocks": 0}
     for block in normalized["blocks"]:
         block_type = block.get("type")
         if block_type in {"paragraph", "heading", "image_placeholder"}:
             paragraphs += 1
             if block_type == "image_placeholder":
                 image_placeholders += 1
+        elif block_type == "title_page":
+            if block.get("title") or block.get("text"):
+                paragraphs += 1
+        elif block_type == "toc":
+            paragraphs += 1
+        elif block_type == "image":
+            images += 1
         elif block_type == "list":
             paragraphs += len(block.get("items") or [])
         elif block_type == "table":
@@ -488,6 +1189,7 @@ def _blueprint_expected_counts(blueprint: dict | None) -> dict[str, int]:
     return {
         "paragraphs": paragraphs,
         "tables": tables,
+        "images": images,
         "image_placeholders": image_placeholders,
         "blocks": len(normalized["blocks"]),
     }
@@ -528,7 +1230,7 @@ def _resolve_filename(session_id: str = None, filename: str = None) -> str | Non
     session = _sessions.get(session_id)
     if not session:
         raise ValueError(f"Unknown session_id: {session_id}")
-    return session.get("filename") or session.get("full_path")
+    return session.get("full_path") or session.get("filename")
 
 
 def _touch_session(session_id: str = None, filename: str = None, full_path: str = None) -> None:
@@ -1138,6 +1840,65 @@ async def word_v2_table(
     return _dump(result)
 
 
+async def word_v2_media(
+    session_id: str,
+    action: str,
+    path: str,
+    paragraph_index: int = None,
+    position: str = "end",
+    width_inches: float = None,
+    height_inches: float = None,
+    width_pt: float = None,
+    height_pt: float = None,
+    alignment: str = None,
+    wrapping: str = "inline",
+    border_style: str = None,
+    border_width_pt: float = None,
+    border_color: str = None,
+    link_to_file: bool = False,
+    paragraph_after: bool = True,
+    left_pt: float = None,
+    top_pt: float = None,
+    relative_horizontal_position: int = None,
+    relative_vertical_position: int = None,
+) -> str:
+    """Insert media into a live session. Actions: insert_image."""
+    action = (action or "").lower()
+    if action not in {"insert_image", "image", "insert"}:
+        return _dump({"error": "Invalid action", "valid_actions": ["insert_image"]})
+    if not path:
+        return _dump({"error": "path is required"})
+
+    try:
+        filename = _resolve_filename(session_id=session_id)
+    except ValueError as exc:
+        return _dump({"error": str(exc)})
+
+    result = _load_result(await live_tools.word_live_insert_image(
+        filename=filename,
+        image_path=path,
+        paragraph_index=paragraph_index,
+        position=position,
+        width_inches=width_inches,
+        height_inches=height_inches,
+        width_pt=width_pt,
+        height_pt=height_pt,
+        alignment=alignment,
+        wrapping=wrapping,
+        border_style=border_style,
+        border_width_pt=border_width_pt,
+        border_color=border_color,
+        link_to_file=link_to_file,
+        paragraph_after=paragraph_after,
+        left_pt=left_pt,
+        top_pt=top_pt,
+        relative_horizontal_position=relative_horizontal_position,
+        relative_vertical_position=relative_vertical_position,
+    ))
+    result["session_id"] = session_id
+    return _dump(result)
+
+
 async def word_v2_mutations(
     session_id: str,
     action: str,
@@ -1145,7 +1906,7 @@ async def word_v2_mutations(
 ) -> str:
     """Preview or apply multiple v2 operations.
 
-    Each operation is {"tool": "edit|format|comment|track_changes|table|layout", ...args}.
+    Each operation is {"tool": "edit|format|comment|track_changes|table|media|layout", ...args}.
     Preview validates shape only; apply runs operations in order.
     """
     operations = operations or []
@@ -1175,6 +1936,8 @@ async def word_v2_mutations(
             raw = await word_v2_track_changes(**args)
         elif tool == "table":
             raw = await word_v2_table(**args)
+        elif tool == "media":
+            raw = await word_v2_media(**args)
         elif tool == "layout":
             raw = await word_v2_layout(**args)
         else:
@@ -1192,6 +1955,8 @@ async def word_v2_layout(
     action: str,
     page_size: str = "letter",
     orientation: str = "portrait",
+    width: float = None,
+    height: float = None,
     margins: dict = None,
     position: str = "end",
     paragraph_index: int = None,
@@ -1224,6 +1989,8 @@ async def word_v2_layout(
                 {
                     "size": page_size,
                     "orientation": orientation,
+                    "width": width,
+                    "height": height,
                     "margins": margins,
                 },
             )
@@ -1270,10 +2037,238 @@ async def _paragraph_count(session_id: str) -> int | None:
     return int(value) if value is not None else None
 
 
+def _find_recent_paragraph_index(session_id: str, text: str, fallback: int | None = None) -> int | None:
+    needle = (text or "").strip()
+    if not needle or sys.platform != "win32":
+        return fallback
+    try:
+        from word_document_server.core.word_com import find_document, get_word_app
+
+        filename = _resolve_filename(session_id=session_id)
+        doc = find_document(get_word_app(), filename)
+        for index in range(int(doc.Paragraphs.Count), 0, -1):
+            para_text = str(doc.Paragraphs(index).Range.Text).rstrip("\r\x07").strip()
+            if para_text == needle:
+                return index
+    except Exception:
+        pass
+    return fallback
+
+
+def _apply_shape_position(shape_obj, shape: dict[str, Any]) -> None:
+    for key, attr in [
+        ("relative_horizontal_position", "RelativeHorizontalPosition"),
+        ("relative_vertical_position", "RelativeVerticalPosition"),
+        ("left_pt", "Left"),
+        ("top_pt", "Top"),
+    ]:
+        value = shape.get(key)
+        if value is None:
+            continue
+        try:
+            setattr(shape_obj, attr, int(value) if key.startswith("relative_") else float(value))
+        except Exception:
+            pass
+    wrap_type = shape.get("wrap_type")
+    if wrap_type is not None:
+        try:
+            shape_obj.WrapFormat.Type = int(wrap_type)
+        except Exception:
+            pass
+
+
+def _apply_shape_visuals(shape_obj, shape: dict[str, Any]) -> None:
+    fill_visible = shape.get("fill_visible")
+    if fill_visible is not None:
+        try:
+            shape_obj.Fill.Visible = int(fill_visible)
+        except Exception:
+            pass
+    fill_color = shape.get("fill_color")
+    if fill_color is not None:
+        try:
+            shape_obj.Fill.ForeColor.RGB = int(fill_color)
+        except Exception:
+            pass
+    line_visible = shape.get("line_visible")
+    if line_visible is not None:
+        try:
+            shape_obj.Line.Visible = int(line_visible)
+        except Exception:
+            pass
+    line_color = shape.get("line_color")
+    if line_color is not None:
+        try:
+            shape_obj.Line.ForeColor.RGB = int(line_color)
+        except Exception:
+            pass
+    line_weight = shape.get("line_weight")
+    if line_weight is not None and float(line_weight) >= 0:
+        try:
+            shape_obj.Line.Weight = float(line_weight)
+        except Exception:
+            pass
+
+
+def _apply_text_box_format(shape_obj, shape: dict[str, Any]) -> None:
+    text_range = _safe_attr(_safe_attr(shape_obj, "TextFrame"), "TextRange")
+    if text_range is None:
+        return
+    text_range.Text = str(shape.get("text") or "")
+    font = _safe_attr(text_range, "Font")
+    if font is None:
+        return
+    font_name = shape.get("font_name")
+    if font_name:
+        try:
+            font.Name = str(font_name)
+        except Exception:
+            pass
+    font_size = shape.get("font_size")
+    if font_size is not None and 0 < float(font_size) < 500:
+        try:
+            font.Size = float(font_size)
+        except Exception:
+            pass
+    bold = shape.get("bold")
+    if bold in {-1, 0, 1, True, False}:
+        try:
+            font.Bold = int(bold)
+        except Exception:
+            pass
+    font_color = shape.get("font_color")
+    if font_color is not None and 0 <= int(font_color) <= 0xFFFFFF:
+        try:
+            font.Color = int(font_color)
+        except Exception:
+            pass
+
+
+def _insert_title_shape_live(session_id: str, shape: dict[str, Any]) -> dict[str, Any]:
+    if sys.platform != "win32":
+        return {"error": "shape replay is only available on Windows"}
+    if not isinstance(shape, dict) or shape.get("error"):
+        return {"success": False, "skipped": True, "reason": "invalid shape"}
+    name = str(shape.get("name") or "")
+    is_text_box = bool(shape.get("text")) or name.lower().startswith("text box") or shape.get("shape_type") == 17
+    is_rectangle = name.lower().startswith("rectangle") or shape.get("auto_shape_type") == 1
+    if not is_text_box and not is_rectangle:
+        return {"success": True, "skipped": True, "reason": "unsupported shape type", "name": name}
+
+    try:
+        from word_document_server.core.word_com import find_document, get_word_app, undo_record
+
+        filename = _resolve_filename(session_id=session_id)
+        app = get_word_app()
+        doc = find_document(app, filename)
+        anchor = doc.Range(0, 0)
+        left = float(shape.get("left_pt") or 0)
+        top = float(shape.get("top_pt") or 0)
+        width = float(shape.get("width_pt") or 100)
+        height = float(shape.get("height_pt") or 40)
+        with undo_record(app, "MCP: Replay Title Shape"):
+            if is_text_box:
+                created = doc.Shapes.AddTextbox(Orientation=1, Left=left, Top=top, Width=width, Height=height, Anchor=anchor)
+                _apply_text_box_format(created, shape)
+            else:
+                auto_shape_type = int(shape.get("auto_shape_type") or 1)
+                created = doc.Shapes.AddShape(Type=auto_shape_type, Left=left, Top=top, Width=width, Height=height, Anchor=anchor)
+            _apply_shape_position(created, shape)
+            _apply_shape_visuals(created, shape)
+        return {
+            "success": True,
+            "name": name,
+            "text_box": is_text_box,
+            "rectangle": is_rectangle and not is_text_box,
+            "width_pt": width,
+            "height_pt": height,
+            "left_pt": left,
+            "top_pt": top,
+        }
+    except Exception as exc:
+        return {"error": str(exc), "name": name}
+
+
 async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict[str, Any]:
     block_type = block.get("type")
+    if block_type == "title_page":
+        title = block.get("title") or block.get("text") or ""
+        if title:
+            raw = await word_v2_edit(
+                session_id=session_id,
+                action="insert_paragraphs",
+                paragraphs=[str(title)],
+                position="end",
+                style=block.get("style") or "Heading 3",
+            )
+            result = _load_result(raw)
+            if result.get("error"):
+                return {"block_type": block_type, "result": result}
+        else:
+            result = {"success": True, "message": "empty title_page block"}
+
+        image_results = []
+        for image in block.get("images") or []:
+            path = image.get("path") or image.get("asset_path")
+            if not path:
+                continue
+            image_raw = await word_v2_media(
+                session_id=session_id,
+                action="insert_image",
+                path=path,
+                position="end",
+                width_pt=image.get("width_pt"),
+                height_pt=image.get("height_pt"),
+                alignment=image.get("alignment") or "center",
+                wrapping=image.get("wrapping") or _word_wrap_name(image.get("wrap_type")) or "inline",
+                paragraph_after=image.get("paragraph_after", True),
+                left_pt=image.get("left_pt"),
+                top_pt=image.get("top_pt"),
+                relative_horizontal_position=image.get("relative_horizontal_position"),
+                relative_vertical_position=image.get("relative_vertical_position"),
+            )
+            image_results.append(_load_result(image_raw))
+
+        shape_results = []
+        for shape in block.get("shapes") or []:
+            if _is_picture_shape(shape):
+                continue
+            shape_results.append(_insert_title_shape_live(session_id, shape))
+
+        break_result = None
+        if block.get("page_break_after", True):
+            break_result = _load_result(await word_v2_layout(
+                session_id=session_id,
+                action="page_break",
+                position="end",
+            ))
+        response = {
+            "block_type": block_type,
+            "result": result,
+            "image_results": image_results,
+            "shape_results": shape_results,
+            "break_result": break_result,
+        }
+        if any(not (image.get("path") or image.get("asset_path")) for image in block.get("images") or []):
+            response["warning"] = "title_page creation replays simple text boxes/rectangles and remains approximate for pictures without asset paths."
+        return response
+
+    if block_type == "toc":
+        try:
+            filename = _resolve_filename(session_id=session_id)
+        except ValueError as exc:
+            return {"block_type": block_type, "result": {"error": str(exc)}}
+        result = _insert_toc_live(
+            filename=filename,
+            title=block.get("title") or "Table of Contents",
+            levels=int(block.get("levels") or 3),
+            page_break_after=block.get("page_break_after", True),
+        )
+        return {"block_type": block_type, "result": result}
+
     if block_type == "paragraph":
         style = block.get("style") or "Normal"
+        before = await _paragraph_count(session_id)
         raw = await word_v2_edit(
             session_id=session_id,
             action="insert_paragraphs",
@@ -1281,7 +2276,27 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
             position="end",
             style=style,
         )
-        return {"block_type": block_type, "result": _load_result(raw)}
+        result = _load_result(raw)
+        format_result = None
+        list_format = _blueprint_list_format(block.get("numbering"))
+        after = await _paragraph_count(session_id) if list_format and not result.get("error") else None
+        if before is not None and after is not None and after > before:
+            fallback_index = max(1, after - 1)
+            target_paragraph = _find_recent_paragraph_index(
+                session_id,
+                str(block.get("text") or ""),
+                fallback=fallback_index,
+            )
+            format_result = _load_result(await word_v2_format(
+                session_id=session_id,
+                action="list",
+                start_paragraph=target_paragraph,
+                end_paragraph=target_paragraph,
+                list_type=list_format["list_type"],
+                level=list_format["level"],
+                continue_previous=list_format["continue_previous"],
+            ))
+        return {"block_type": block_type, "result": result, "format_result": format_result}
 
     if block_type == "heading":
         if block.get("page_break_before"):
@@ -1338,6 +2353,31 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
         )
         return {"block_type": block_type, "result": _load_result(raw)}
 
+    if block_type == "image":
+        raw = await word_v2_media(
+            session_id=session_id,
+            action="insert_image",
+            path=block.get("path"),
+            paragraph_index=block.get("paragraph_index"),
+            position=block.get("position") or "end",
+            width_inches=block.get("width_inches"),
+            height_inches=block.get("height_inches"),
+            width_pt=block.get("width_pt"),
+            height_pt=block.get("height_pt"),
+            alignment=block.get("alignment"),
+            wrapping=block.get("wrapping") or _word_wrap_name(block.get("wrap_type")) or "inline",
+            border_style=block.get("border_style"),
+            border_width_pt=block.get("border_width_pt"),
+            border_color=block.get("border_color"),
+            link_to_file=bool(block.get("link_to_file")),
+            paragraph_after=block.get("paragraph_after", True),
+            left_pt=block.get("left_pt"),
+            top_pt=block.get("top_pt"),
+            relative_horizontal_position=block.get("relative_horizontal_position"),
+            relative_vertical_position=block.get("relative_vertical_position"),
+        )
+        return {"block_type": block_type, "result": _load_result(raw)}
+
     if block_type == "image_placeholder":
         label = block.get("label") or block.get("asset_id") or "image"
         raw = await word_v2_edit(
@@ -1350,7 +2390,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
         return {
             "block_type": block_type,
             "result": _load_result(raw),
-            "warning": "image_placeholder creates editable placeholder text; real image insertion will be added in word_v2_media.",
+            "warning": "image_placeholder creates editable placeholder text; use an image block or word_v2_media for real images.",
         }
 
     if block_type == "page_break":
@@ -1381,6 +2421,7 @@ async def word_v2_blueprint(
     blueprint: dict = None,
     out: str = None,
     visible: bool = True,
+    asset_dir: str = None,
 ) -> str:
     """Create, inspect, validate, or export structured document blueprints."""
     action = (action or "").lower()
@@ -1393,7 +2434,7 @@ async def word_v2_blueprint(
             filename = _resolve_filename(session_id=session_id)
         except ValueError as exc:
             return _dump({"error": str(exc)})
-        result = _inspect_blueprint_live(filename)
+        result = _inspect_blueprint_live(filename, asset_dir=asset_dir)
         result["session_id"] = session_id
         if not result.get("error") and session_id in _sessions:
             _sessions[session_id]["blueprint"] = result.get("session_blueprint")
@@ -1440,6 +2481,8 @@ async def word_v2_blueprint(
             action="page_setup",
             page_size=page_setup.get("size") or "letter",
             orientation=page_setup.get("orientation") or "portrait",
+            width=page_setup.get("width"),
+            height=page_setup.get("height"),
             margins=page_setup.get("margins"),
         )
 
@@ -1476,6 +2519,15 @@ async def word_v2_blueprint(
                 "results": block_results,
                 "warnings": warnings,
             })
+
+    if any((block.get("type") == "toc") for block in normalized["blocks"]):
+        try:
+            filename = _resolve_filename(session_id=new_session_id)
+            update_result = _update_tocs_live(filename)
+            if update_result.get("error"):
+                warnings.append({"index": None, "warning": update_result["error"]})
+        except Exception as exc:
+            warnings.append({"index": None, "warning": f"TOC update failed: {exc}"})
 
     save_result = None
     if out:

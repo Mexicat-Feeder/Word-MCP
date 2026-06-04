@@ -9,7 +9,7 @@ choosing between duplicate ways to open, read, edit, save, or close documents.
 
 ## Public Tool Surface
 
-The server registers 14 public MCP tools:
+The server registers 15 public MCP tools:
 
 | Tool | Purpose |
 | --- | --- |
@@ -23,13 +23,16 @@ The server registers 14 public MCP tools:
 | `word_v2_comment` | Create, reply to, resolve, delete, list, or get comments. |
 | `word_v2_track_changes` | Toggle, list, accept, reject, or decide revisions. |
 | `word_v2_table` | Create, inspect, edit, and format tables. |
+| `word_v2_media` | Insert images with sizing, alignment, wrapping, floating placement, and optional borders. |
 | `word_v2_mutations` | Preview or apply grouped v2 operations in order. |
 | `word_v2_layout` | Set page setup, insert page/section breaks, and set document properties. |
 | `word_v2_blueprint` | Create, inspect, validate, or export structured document blueprints. |
 | `word_v2_protection` | Protect or unprotect the active document. |
 
-See [LIVE_V2_AGENT_GUIDE.md](LIVE_V2_AGENT_GUIDE.md) for agent workflow and
-quirks.
+See [LIVE_V2_AGENT_GUIDE.md](LIVE_V2_AGENT_GUIDE.md) for the full agent
+workflow reference. For local models, pass
+[WORD_MCP_LIVE_SKILL.md](WORD_MCP_LIVE_SKILL.md) as the compact operational
+skill.
 
 ## Requirements
 
@@ -113,6 +116,18 @@ simple edits start from consistent page setup and professional default styles.
 For precision document generation, use `word_v2_blueprint(action="create",
 blueprint={...})` to create from a structured block list, then validate or
 inspect with `word_v2_blueprint(action="validate"|"inspect")`.
+For reference-driven recreation, pass `asset_dir` to
+`word_v2_blueprint(action="inspect", asset_dir="C:/path/to/images")`. The
+returned blueprint is page-aware and includes title-page, TOC, body-image,
+table, and shape metadata for higher-fidelity rebuilds. Floating image blocks
+can carry `wrapping`, `left_pt`, `top_pt`, and relative positioning constants;
+preserve those values when recreating from a reference.
+Paragraph `numbering` metadata from inspected blueprints is also replayed for
+real Word bullet/numbered list paragraphs.
+Title-page text boxes and simple rectangles are replayed from inspected shape
+records; title-page pictures still require mapped assets for faithful rebuilds.
+Title-page image assets are detected when their filenames contain `title` and
+are mapped separately from body screenshots.
 
 ## Development
 

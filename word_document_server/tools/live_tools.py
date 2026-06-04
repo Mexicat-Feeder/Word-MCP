@@ -1964,6 +1964,11 @@ async def word_live_insert_image(
     border_width_pt: float = None,
     border_color: str = None,
     link_to_file: bool = False,
+    paragraph_after: bool = True,
+    left_pt: float = None,
+    top_pt: float = None,
+    relative_horizontal_position: int = None,
+    relative_vertical_position: int = None,
 ) -> str:
     """Insert an image into an open Word document.
 
@@ -1987,6 +1992,12 @@ async def word_live_insert_image(
         border_width_pt: Border line width in points (e.g. 1.0, 2.0). Default: 1.0.
         border_color: Border color as "#RRGGBB" hex string. Default: black (#000000).
         link_to_file: If True, links to the file instead of embedding it.
+        paragraph_after: If True, inserts a paragraph break after the image so
+            subsequent content starts below the image.
+        left_pt: Optional floating shape left position in points.
+        top_pt: Optional floating shape top position in points.
+        relative_horizontal_position: Optional Word COM relative horizontal position constant.
+        relative_vertical_position: Optional Word COM relative vertical position constant.
 
     Returns:
         JSON with image insertion result.
@@ -2095,6 +2106,17 @@ async def word_live_insert_image(
             result_height = inline_shape.Height
             result_wrapping = "inline"
 
+            if paragraph_after:
+                try:
+                    after_image = inline_shape.Range.Duplicate
+                    after_image.Collapse(0)  # wdCollapseEnd
+                    after_image.InsertAfter("\r")
+                except Exception:
+                    try:
+                        rng.InsertAfter("\r")
+                    except Exception:
+                        pass
+
             # Convert to floating Shape for non-inline wrapping
             if wrap_val is not None:
                 float_shape = inline_shape.ConvertToShape()
@@ -2102,6 +2124,27 @@ async def word_live_insert_image(
                 result_wrapping = wrapping.lower()
                 result_width = float_shape.Width
                 result_height = float_shape.Height
+
+                if relative_horizontal_position is not None:
+                    try:
+                        float_shape.RelativeHorizontalPosition = int(relative_horizontal_position)
+                    except Exception:
+                        pass
+                if relative_vertical_position is not None:
+                    try:
+                        float_shape.RelativeVerticalPosition = int(relative_vertical_position)
+                    except Exception:
+                        pass
+                if left_pt is not None:
+                    try:
+                        float_shape.Left = float(left_pt)
+                    except Exception:
+                        pass
+                if top_pt is not None:
+                    try:
+                        float_shape.Top = float(top_pt)
+                    except Exception:
+                        pass
 
                 # Apply border to floating shape
                 if border_style is not None:
@@ -2128,7 +2171,7 @@ async def word_live_insert_image(
                             line.Style = 3  # msoLineThinThin
 
                 # Apply alignment for floating shape using relative positioning
-                if alignment is not None:
+                if alignment is not None and left_pt is None:
                     al = alignment.lower()
                     if al in ALIGN_MAP:
                         # Use margin-relative positioning
@@ -2181,6 +2224,11 @@ async def word_live_insert_image(
             "wrapping": result_wrapping,
             "border": border_style or "none",
             "linked": link_to_file,
+            "paragraph_after": paragraph_after,
+            "left_pt": left_pt,
+            "top_pt": top_pt,
+            "relative_horizontal_position": relative_horizontal_position,
+            "relative_vertical_position": relative_vertical_position,
         }, ensure_ascii=False)
 
     except Exception as e:
@@ -2679,28 +2727,15 @@ async def word_live_open_document(
         if not os.path.exists(filepath):
             return json.dumps({"error": f"File not found: {filepath}"})
 
-        # Word COM Open signature:
-        # Documents.Open(FileName, ConfirmConversions, ReadOnly, AddToRecentFiles,
-        #                PasswordDocument, PasswordTemplate, Revert,
-        #                WritePasswordDocument, WritePasswordTemplate, Format,
-        #                Encoding, Visible, OpenAndRepair, DocumentDirection,
-        #                NoEncodingDialog, VisibleByDefault)
+        # Keep the Open call minimal. Passing Format/Encoding for normal .docx
+        # files can make some Shape metadata (Type, TextFrame, Fill) unreadable
+        # through COM on otherwise valid documents.
         doc = app.Documents.Open(
             FileName=filepath,
-            ConfirmConversions=False,
             ReadOnly=read_only,
             AddToRecentFiles=False,
             PasswordDocument=password or "",
-            PasswordTemplate="",
-            Revert=True,
-            WritePasswordDocument="",
-            WritePasswordTemplate="",
-            Format=0,
-            Encoding=65001,  # UTF-8
             Visible=visible,
-            OpenAndRepair=False,
-            DocumentDirection=1,  # wdDirectionLTR
-            NoEncodingDialog=False,
         )
 
         return json.dumps({
@@ -2714,6 +2749,33 @@ async def word_live_open_document(
 
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+def _word_close_save_flag(save_changes: str):
+    wdDoNotSaveChanges = 0
+    wdPromptToSaveChanges = -1
+    wdSaveChanges = -2
+    save_key = str(save_changes or "save").strip().lower().replace("_", " ").replace("-", " ")
+    save_map = {
+        "save": wdSaveChanges,
+        "yes": wdSaveChanges,
+        "true": wdSaveChanges,
+        "dont": wdDoNotSaveChanges,
+        "don't": wdDoNotSaveChanges,
+        "do not save": wdDoNotSaveChanges,
+        "dont save": wdDoNotSaveChanges,
+        "discard": wdDoNotSaveChanges,
+        "no": wdDoNotSaveChanges,
+        "false": wdDoNotSaveChanges,
+        "prompt": wdPromptToSaveChanges,
+        "ask": wdPromptToSaveChanges,
+    }
+    if save_key not in save_map:
+        raise ValueError(
+            f"Unknown save_changes value: {save_changes!r}. "
+            "Use 'save', 'no', 'discard', or 'prompt'."
+        )
+    return save_map[save_key]
 
 
 async def word_live_close_document(
@@ -2743,18 +2805,10 @@ async def word_live_close_document(
 
         app = get_word_app()
 
-        # Map save_changes string to Word constant
-        wdDoNotSaveChanges = 0
-        wdPromptToSaveChanges = -1
-        wdSaveChanges = -2
-
-        save_map = {
-            "save": wdSaveChanges,
-            "dont": wdDoNotSaveChanges,
-            "discard": wdDoNotSaveChanges,
-            "prompt": wdPromptToSaveChanges,
-        }
-        save_flag = save_map.get(save_changes.lower(), wdPromptToSaveChanges)
+        try:
+            save_flag = _word_close_save_flag(save_changes)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
 
         # If no filename, close the active document
         if not filename:
@@ -2774,16 +2828,10 @@ async def word_live_close_document(
                 "message": f"Closed '{name}' (save_changes={save_changes})",
             }, ensure_ascii=False)
 
-        # Re-fetch doc from app.Documents to get a fresh COM reference
-        fresh_doc = None
-        target_name = filename.lower() if filename else None
-        for i in range(1, app.Documents.Count + 1):
-            d = app.Documents(i)
-            if target_name and d.Name.lower() == target_name:
-                fresh_doc = d
-                break
-        if not fresh_doc:
-            return json.dumps({"error": f"Document '{filename}' not found in open documents"})
+        # Re-fetch doc from app.Documents to get a fresh COM reference.  Use
+        # find_document so full paths remain valid and duplicate basenames do
+        # not accidentally close the wrong document.
+        fresh_doc = find_document(app, filename)
         name = fresh_doc.Name
         fresh_doc.Close(SaveChanges=save_flag)
         # If no documents left, quit Word gracefully

@@ -1706,6 +1706,7 @@ async def word_live_list_open() -> str:
             })
 
         documents = []
+        skipped_unreadable = 0
         for i in range(1, count + 1):
             entry = {"index": i}
             try:
@@ -1747,12 +1748,16 @@ async def word_live_list_open() -> str:
             )
             if errors:
                 entry["errors"] = errors
+            if not entry.get("name") and not entry.get("full_path"):
+                skipped_unreadable += 1
+                continue
             documents.append(entry)
 
         return json.dumps({
             "success": True,
             "count": len(documents),
             "documents": documents,
+            "skipped_unreadable": skipped_unreadable,
         }, ensure_ascii=False)
 
     except Exception as e:

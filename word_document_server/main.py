@@ -378,6 +378,58 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
+            title="Word V2 Media",
+            destructiveHint=True,
+        ),
+    )
+    async def word_v2_media(
+        session_id: str,
+        action: str,
+        path: str,
+        paragraph_index: int = None,
+        position: str = "end",
+        width_inches: float = None,
+        height_inches: float = None,
+        width_pt: float = None,
+        height_pt: float = None,
+        alignment: str = None,
+        wrapping: str = "inline",
+        border_style: str = None,
+        border_width_pt: float = None,
+        border_color: str = None,
+        link_to_file: bool = False,
+        paragraph_after: bool = True,
+        left_pt: float = None,
+        top_pt: float = None,
+        relative_horizontal_position: int = None,
+        relative_vertical_position: int = None,
+    ):
+        """Insert media into a live session."""
+        return await live_v2_tools.word_v2_media(
+            session_id=session_id,
+            action=action,
+            path=path,
+            paragraph_index=paragraph_index,
+            position=position,
+            width_inches=width_inches,
+            height_inches=height_inches,
+            width_pt=width_pt,
+            height_pt=height_pt,
+            alignment=alignment,
+            wrapping=wrapping,
+            border_style=border_style,
+            border_width_pt=border_width_pt,
+            border_color=border_color,
+            link_to_file=link_to_file,
+            paragraph_after=paragraph_after,
+            left_pt=left_pt,
+            top_pt=top_pt,
+            relative_horizontal_position=relative_horizontal_position,
+            relative_vertical_position=relative_vertical_position,
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
             title="Word V2 Mutations",
             readOnlyHint=False,
         ),
@@ -405,6 +457,8 @@ def register_tools() -> None:
         action: str,
         page_size: str = "letter",
         orientation: str = "portrait",
+        width: float = None,
+        height: float = None,
         margins: dict = None,
         position: str = "end",
         paragraph_index: int = None,
@@ -425,6 +479,8 @@ def register_tools() -> None:
             action=action,
             page_size=page_size,
             orientation=orientation,
+            width=width,
+            height=height,
             margins=margins,
             position=position,
             paragraph_index=paragraph_index,
@@ -452,6 +508,7 @@ def register_tools() -> None:
         blueprint: dict = None,
         out: str = None,
         visible: bool = True,
+        asset_dir: str = None,
     ):
         """Create, inspect, validate, or export structured document blueprints."""
         return await live_v2_tools.word_v2_blueprint(
@@ -460,6 +517,7 @@ def register_tools() -> None:
             blueprint=blueprint,
             out=out,
             visible=visible,
+            asset_dir=asset_dir,
         )
 
     @mcp.tool(

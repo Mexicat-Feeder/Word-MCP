@@ -130,6 +130,39 @@ Actions:
 Table row and column indexes follow the underlying live COM table tools:
 generally 1-based for live table modification.
 
+### `word_v2_media`
+
+Actions:
+
+- `insert_image`: insert a PNG/JPG/BMP/etc. into the live document.
+
+Use `path` for the image file path. Use `position="end"` for append-style
+generation, or `paragraph_index` to insert before a specific paragraph. Width
+can be controlled with `width_pt` or `width_inches`; if only width or height is
+provided, Word keeps the image aspect ratio.
+By default `paragraph_after=true`, so the next block starts below the image.
+
+Common example:
+
+```json
+{
+  "session_id": "word_abc123",
+  "action": "insert_image",
+  "path": "C:\\Docs\\assets\\images\\2.1 Initial Setup pic 1.png",
+  "position": "end",
+  "width_pt": 504,
+  "alignment": "center",
+  "wrapping": "inline"
+}
+```
+
+For floating images copied from an inspected blueprint, preserve placement
+fields instead of simplifying them. Use `wrapping` or `wrap_type`, plus
+`left_pt`, `top_pt`, `relative_horizontal_position`, and
+`relative_vertical_position` when they are present. Values such as
+`left_pt: -999995.0` are valid Word positioning values and should be replayed
+as-is.
+
 ### `word_v2_layout`
 
 Actions:
@@ -146,22 +179,48 @@ Use this when document structure matters more than text edits alone.
 Actions:
 
 - `create`: create a new `default_plain` document from structured blocks.
-- `inspect`: inspect an open document into a blueprint-like structure.
+- `inspect`: inspect an open document into a page-aware blueprint.
 - `validate`: compare a blueprint's expected structure against a live session.
 - `export`: return the current inspected blueprint JSON.
 
+For reference-driven recreation, call `inspect` with `asset_dir` pointing to the
+folder of extracted screenshots. The inspector returns `document.pages`,
+`document.blocks`, `document.images`, `document.tables`, and `document.shapes`.
+Page roles distinguish `title_page`, `toc`, and `body`; body images include
+exact `width_pt`/`height_pt`, mapped `path` values when assets are available,
+and floating placement metadata such as `left_pt`, `top_pt`, `wrap_type`, and
+relative positioning constants.
+
+Title-page blocks can include `shapes`. Creation replays simple text boxes and
+rectangles from those records, including position, size, fill/line visibility,
+and basic text formatting. Title-page pictures still need mapped image assets;
+without them, recreation remains approximate.
+Put title-page picture assets in the same `asset_dir` with `title` in the
+filename, such as `Title Page pic 1.png`, `Title page pic 2 logo.png`, etc. The
+inspector maps those title assets to page-1 picture shapes separately from body
+screenshots, then replays them as positioned floating images.
+
 Supported first-pass block types:
 
+- `title_page`: `{ "type": "title_page", "text": "...", "page_break_after": true }`
+- shaped `title_page`: `{ "type": "title_page", "shapes": [{ "name": "Text Box 1", "text": "Title", "left_pt": 24, "top_pt": 48, "width_pt": 420, "height_pt": 90 }] }`
+- `toc`: `{ "type": "toc", "title": "Table of Contents", "levels": 3 }`
 - `heading`: `{ "type": "heading", "text": "...", "level": 1 }`
 - `paragraph`: `{ "type": "paragraph", "text": "...", "style": "Normal" }`
 - `list`: `{ "type": "list", "items": ["One", "Two"], "ordered": false }`
 - `table`: `{ "type": "table", "rows": [["Metric", "Value"]] }`
+- `image`: `{ "type": "image", "path": "C:\\Docs\\screen.png", "width_pt": 504, "alignment": "center" }`
+- floating `image`: `{ "type": "image", "path": "C:\\Docs\\screen.png", "width_pt": 396, "height_pt": 231.1, "wrapping": "infront", "left_pt": -999995.0, "top_pt": 55.5, "relative_horizontal_position": 0, "relative_vertical_position": 2 }`
 - `page_break`: `{ "type": "page_break" }`
 - `section_break`: `{ "type": "section_break", "break_type": "next_page" }`
-- `image_placeholder`: placeholder text until real media insertion lands.
+- `image_placeholder`: editable placeholder text when the asset is unavailable.
 
 Use blueprint mode for high-fidelity generation. Use simple edit/format/table
 tools for quick spontaneous documents.
+
+When replaying an inspected blueprint, keep paragraph `numbering` objects. The
+creator uses them to reapply Word list formatting to paragraphs that were real
+bullets or numbered list items in the reference.
 
 ### `word_v2_mutations`
 
