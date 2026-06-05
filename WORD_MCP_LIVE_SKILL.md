@@ -1,12 +1,47 @@
+---
+name: word-mcp
+description: "Create, edit, inspect, redline, comment on, save, close, or recreate Microsoft Word documents using the connected Word MCP live tools. Always prefer word_v2_* MCP tool calls over Python, python-docx, pywin32, PowerShell, OOXML zip edits, or manual scripts for Word document work."
+version: 1.1.0
+author: hermes-agent
+tags: [word, mcp, documents, office]
+---
+
 # Word MCP Live Skill
 
-Use this skill when working with the Word MCP live COM tools. It is written for
-local models that need strict tool-use patterns.
+Use this skill for Word document tasks when the Word MCP server is available.
+It is written for local models that need strict tool-use patterns.
+
+## First Choice: Word MCP Tools
+
+For document work, call the connected Word MCP tools directly. Do not write or
+run Python to inspect, create, edit, redline, comment, save, close, or rebuild a
+Word document.
+
+Do not use Python, `python-docx`, `pywin32`, PowerShell COM automation, OOXML
+zip editing, or filesystem document mutation except when:
+
+- the user explicitly asks to debug or modify the Word MCP server itself;
+- the Word MCP server/tools are unavailable and the user approves a fallback;
+- the task is ordinary repo maintenance, such as running tests.
+
+If the task mentions a `.docx`, an open Word document, comments, tracked
+changes, layout, images, tables, styles, headers, footers, or document
+recreation, start with `word_v2_open` or `word_v2_blueprint`; do not start by
+creating a Python script.
+
+When the client exposes namespaced tools, use the Word MCP namespace directly
+such as `mcp__word.word_v2_open`, `mcp__word.word_v2_edit`, and
+`mcp__word.word_v2_blueprint`. The JSON examples below are tool arguments, not
+shell commands.
 
 ## Core Rules
 
-- Always open, attach, or list first. Carry the returned `session_id`.
-- Prefer `word_v2_*` tools only. Do not call lower-level `word_live_*` tools.
+- Always open, attach, or list first with `word_v2_open`. Carry the returned
+  `session_id`.
+- Use `word_v2_*` MCP tools only for document operations. Do not call
+  lower-level `word_live_*` tools.
+- Do not use Python/manual COM/OOXML scripts as a substitute for a missing or
+  unfamiliar MCP call. Use the closest `word_v2_*` tool and inspect after.
 - Do not invent file paths. Use paths given by the user or returned by inspect.
 - Inspect before making structural changes when the document already exists.
 - Re-inspect after creation or edits before saving final work.
@@ -14,9 +49,34 @@ local models that need strict tool-use patterns.
 - Close documents when finished. Use `save_changes="save"` only when the result
   was inspected and looks correct.
 
+## Tool Selection
+
+- Open, attach, list, or create a default blank document: `word_v2_open`.
+- Save in place, save as, or export PDF: `word_v2_save`.
+- Close a document: `word_v2_close`.
+- Read text, page text, comments, revisions, document info, or paragraph
+  formatting: `word_v2_get_content`.
+- Find target text and get reusable handles: `word_v2_search`.
+- Insert, replace, delete, insert paragraphs, hyperlinks, or footnotes:
+  `word_v2_edit`.
+- Apply text formatting, paragraph formatting, styles, or lists:
+  `word_v2_format`.
+- Create, list, reply to, resolve, or delete comments: `word_v2_comment`.
+- Enable, list, accept, reject, or decide tracked changes:
+  `word_v2_track_changes`.
+- Create, inspect, edit, or format tables: `word_v2_table`.
+- Insert images/media with size, wrapping, and placement: `word_v2_media`.
+- Page setup, breaks, and document properties: `word_v2_layout`.
+- Inspect, validate, export, or create structured page-aware documents:
+  `word_v2_blueprint`.
+- Protect or unprotect documents: `word_v2_protection`.
+- Batch multiple edits in order: `word_v2_mutations`.
+
 ## Open Or Attach
 
 If the user says the document is already open:
+
+Call `word_v2_open` with:
 
 ```json
 {"action": "list"}
@@ -24,11 +84,15 @@ If the user says the document is already open:
 
 Then attach by index, name, or full path:
 
+Call `word_v2_open` with:
+
 ```json
 {"action": "attach", "path": "1"}
 ```
 
 If the user gives a file path:
+
+Call `word_v2_open` with:
 
 ```json
 {"path": "C:\\Docs\\Example.docx", "read_only": false, "visible": false}
@@ -125,6 +189,8 @@ Expected inspect fields:
 {"session_id": "word_abc", "find_text": "old text"}
 ```
 
+Call `word_v2_edit` with:
+
 ```json
 {
   "session_id": "word_abc",
@@ -134,6 +200,8 @@ Expected inspect fields:
   "track_changes": true
 }
 ```
+
+Call `word_v2_comment` with:
 
 ```json
 {
@@ -185,8 +253,22 @@ Use `word_v2_blueprint(action="create")` for structured output.
 ## Local Model Failure Modes
 
 - Do not manually retype large blueprints. Copy returned blocks forward.
+- Do not call Python because you need to read or edit a `.docx`; use
+  `word_v2_get_content`, `word_v2_search`, `word_v2_edit`, or
+  `word_v2_blueprint`.
+- Do not create a temporary script to add comments or tracked changes; use
+  `word_v2_comment` and `word_v2_track_changes`.
 - Do not drop `numbering`; it is needed to replay real Word lists.
 - Do not drop title-page `images` or `shapes`; they are needed for cover pages.
 - Do not replace absolute Windows paths with guessed relative paths.
 - Do not save if inspect shows obvious missing images, warnings, or bad page
   roles.
+
+## If A Tool Call Fails
+
+1. Read the error and retry with corrected parameters.
+2. If the session is unknown, call `word_v2_open(action="list")` and attach
+   again.
+3. If a target is missing, inspect with `word_v2_get_content` or search with
+   `word_v2_search`.
+4. Do not switch to Python unless the user agrees the MCP path is unavailable.
