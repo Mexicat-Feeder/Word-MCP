@@ -41,6 +41,28 @@ names like `mcp__word.word_v2_open`. Those names are not Hermes tools.
 The JSON examples below are arguments for the named Hermes tool, not shell
 commands.
 
+## Do Not Use Terminal For MCP Calls
+
+Do not run shell commands such as:
+
+```bash
+hermes mcp call word word_v2_open '{"action":"list"}'
+```
+
+Hermes has no `mcp call` command. `hermes mcp test word` only verifies that the
+server can start and list tool schemas; it does not execute Word MCP tools.
+
+To open/list Word documents, make a native Hermes tool call to
+`mcp_word_word_v2_open` with:
+
+```json
+{"action": "list"}
+```
+
+If `mcp_word_word_v2_open` is not available in the current toolset, stop and
+report that the session must be restarted with the `word` toolset. Do not use
+the terminal tool to work around missing MCP tools.
+
 ## Toolset Requirement
 
 The `word` MCP server must be in the active toolset. If Hermes says a Word MCP
