@@ -1243,6 +1243,41 @@ def _touch_session(session_id: str = None, filename: str = None, full_path: str 
     _sessions[session_id]["updated_at"] = time.time()
 
 
+def _session_records() -> list[dict[str, Any]]:
+    """Return agent-facing session metadata without exposing large cached objects."""
+    records = []
+    now = time.time()
+    for session_id, session in sorted(_sessions.items()):
+        records.append({
+            "session_id": session_id,
+            "filename": session.get("filename"),
+            "full_path": session.get("full_path"),
+            "template": session.get("template"),
+            "created_at": session.get("created_at"),
+            "updated_at": session.get("updated_at"),
+            "age_seconds": round(now - session.get("created_at", now), 1),
+            "has_blueprint": bool(session.get("blueprint")),
+            "handle_count": len(_handles.get(session_id, {})),
+        })
+    return records
+
+
+def _long_find_usage(length: int, field: str = "find_text") -> dict[str, Any]:
+    return {
+        "error": f"{field} is {length} chars (Word Find limit: 255).",
+        "usage": (
+            "Do not split blindly if this is a long paragraph edit. Use a shorter unique "
+            "search string with word_v2_search(context_chars=...), then edit with the returned "
+            "handle; or replace a full paragraph by passing paragraph_index to word_v2_edit."
+        ),
+        "alternatives": [
+            "word_v2_search(session_id, find_text='<short unique anchor>', context_chars=120)",
+            "word_v2_edit(session_id, action='replace', paragraph_index=3, text='<new paragraph>', track_changes=True)",
+            "word_v2_get_content(session_id, action='page_text', page=1, end_page=1) to get char offsets, then use start/end",
+        ],
+    }
+
+
 def _with_session(result: dict[str, Any]) -> dict[str, Any]:
     session_id = _register_session(result)
     result["session_id"] = session_id
@@ -1354,6 +1389,45 @@ def _target_range(target: dict[str, Any]) -> tuple[int, int]:
     return int(start), int(end)
 
 
+def _resolve_paragraph_target(filename: str, paragraph_index: int) -> dict[str, Any]:
+    if paragraph_index is None:
+        raise ValueError("paragraph_index is required")
+    if paragraph_index < 1:
+        raise ValueError("paragraph_index is 1-based; use 1 for the first paragraph")
+
+    if sys.platform != "win32":
+        raise ValueError("paragraph_index targeting is only available on Windows live sessions")
+
+    from word_document_server.core.word_com import get_word_app, find_document
+
+    app = get_word_app()
+    doc = find_document(app, filename)
+    total = doc.Paragraphs.Count
+    if paragraph_index > total:
+        raise ValueError(f"paragraph_index {paragraph_index} out of range (1-{total})")
+
+    rng = doc.Paragraphs(paragraph_index).Range
+    start = int(rng.Start)
+    end = int(rng.End)
+    try:
+        text = str(rng.Text)
+        while end > start and text.endswith(("\r", "\x07")):
+            end -= 1
+            text = text[:-1]
+    except Exception:
+        if end > start:
+            end -= 1
+    return {"kind": "selection", "start": start, "end": end, "paragraph_index": paragraph_index}
+
+
+def _lower_insert_paragraph_index(paragraph_index: int | None) -> int | None:
+    if paragraph_index is None:
+        return None
+    if paragraph_index < 1:
+        raise ValueError("paragraph_index is 1-based; use 1 for the first paragraph")
+    return paragraph_index - 1
+
+
 async def word_v2_open(
     path: str = None,
     directory: str = ".",
@@ -1369,12 +1443,23 @@ async def word_v2_open(
     if action == "list":
         result = _load_result(await live_read_tools.word_live_list_open())
         if not result.get("error"):
+            result["session_count"] = len(_sessions)
+            result["sessions"] = _session_records()
             result["usage"] = (
                 "Call word_v2_open() to attach to the active document, "
                 "word_v2_open(action='attach', path='<name|full_path|index>') to attach a listed document, "
+                "word_v2_open(action='sessions') to list MCP session IDs, "
                 "or word_v2_open(path='<file.docx>') to open a file."
             )
         return _dump(result)
+    if action in {"sessions", "list_sessions"}:
+        sessions = _session_records()
+        return _dump({
+            "success": True,
+            "count": len(sessions),
+            "sessions": sessions,
+            "usage": "Use an existing session_id with word_v2_get_content, word_v2_search, word_v2_edit, word_v2_comment, word_v2_save, and word_v2_close.",
+        })
 
     if action in {"active", "attach"} or (action == "open" and path_alias in {"", "active", "current"}):
         result = await _attach_open_document(None if path_alias in {"", "active", "current"} else path)
@@ -1395,7 +1480,7 @@ async def word_v2_open(
     else:
         return _dump({
             "error": "Invalid action",
-            "valid_actions": ["open", "active", "attach", "list", "new"],
+            "valid_actions": ["open", "active", "attach", "list", "sessions", "new"],
         })
 
     if result.get("error"):
@@ -1463,7 +1548,7 @@ async def word_v2_get_content(
 ) -> str:
     """Read document content from a live session.
 
-    Actions: text, page_text, info, comments, revisions, paragraph_format.
+    Actions: text, page_text, info, comments, revisions, paragraph_format, snapshot, diff.
     """
     try:
         filename = _resolve_filename(session_id=session_id)
@@ -1485,10 +1570,14 @@ async def word_v2_get_content(
         result = _load_result(await live_read_tools.word_live_get_paragraph_format(
             filename, start_paragraph, end_paragraph, include_runs
         ))
+    elif action == "snapshot":
+        result = _load_result(await live_read_tools.word_live_take_snapshot(filename))
+    elif action == "diff":
+        result = _load_result(await live_read_tools.word_live_get_diff(filename))
     else:
         return _dump({
             "error": "Invalid action",
-            "valid_actions": ["text", "page_text", "info", "comments", "revisions", "paragraph_format"],
+            "valid_actions": ["text", "page_text", "info", "comments", "revisions", "paragraph_format", "snapshot", "diff"],
         })
     result["session_id"] = session_id
     return _dump(result)
@@ -1508,6 +1597,9 @@ async def word_v2_search(
         filename = _resolve_filename(session_id=session_id)
     except ValueError as exc:
         return _dump({"error": str(exc)})
+
+    if len(find_text or "") > 255:
+        return _dump(_long_find_usage(len(find_text or "")))
 
     result = _load_result(await live_read_tools.word_live_find_text(
         filename=filename,
@@ -1569,12 +1661,17 @@ async def word_v2_edit(
             ))
         elif action == "replace":
             if find_text:
+                if len(find_text) > 255:
+                    return _dump(_long_find_usage(len(find_text)))
                 result = _load_result(await live_tools.word_live_replace_text(
                     filename, find_text, replace_text or text, match_case,
                     whole_word, use_wildcards, replace_all, track_changes,
                 ))
             else:
-                resolved = _resolve_target(session_id, handle, target, start, end)
+                if paragraph_index is not None and not (handle or target or (start is not None and end is not None)):
+                    resolved = _resolve_paragraph_target(filename, paragraph_index)
+                else:
+                    resolved = _resolve_target(session_id, handle, target, start, end)
                 target_start, target_end = _target_range(resolved)
                 delete_result = _load_result(await live_tools.word_live_delete_text(
                     filename, target_start, target_end, track_changes,
@@ -1587,19 +1684,25 @@ async def word_v2_edit(
                 result = {"success": not insert_result.get("error"), "delete": delete_result, "insert": insert_result}
         elif action == "delete":
             if find_text:
+                if len(find_text) > 255:
+                    return _dump(_long_find_usage(len(find_text)))
                 result = _load_result(await live_tools.word_live_replace_text(
                     filename, find_text, "", match_case, whole_word,
                     use_wildcards, replace_all, track_changes,
                 ))
             else:
-                resolved = _resolve_target(session_id, handle, target, start, end)
+                if paragraph_index is not None and not (handle or target or (start is not None and end is not None)):
+                    resolved = _resolve_paragraph_target(filename, paragraph_index)
+                else:
+                    resolved = _resolve_target(session_id, handle, target, start, end)
                 target_start, target_end = _target_range(resolved)
                 result = _load_result(await live_tools.word_live_delete_text(
                     filename, target_start, target_end, track_changes,
                 ))
         elif action == "insert_paragraphs":
+            lower_paragraph_index = _lower_insert_paragraph_index(paragraph_index)
             result = _load_result(await live_tools.word_live_insert_paragraphs(
-                filename, paragraphs, find_text or None, paragraph_index,
+                filename, paragraphs, find_text or None, lower_paragraph_index,
                 position, style, track_changes,
             ))
         elif action == "undo":
@@ -1719,6 +1822,16 @@ async def word_v2_comment(
             if handle or target:
                 resolved = _resolve_target(session_id, handle, target, start, end)
                 start, end = _target_range(resolved)
+            if start is None and end is None and paragraph_index is None:
+                return _dump({
+                    "error": "Comment target required",
+                    "usage": (
+                        "Provide one of: handle from word_v2_search, target, start/end offsets, "
+                        "or paragraph_index from word_v2_get_content. Example: "
+                        "word_v2_comment(session_id, action='create', paragraph_index=3, text='...')."
+                    ),
+                    "valid_targets": ["handle", "target", "start/end", "paragraph_index"],
+                })
             result = _load_result(await live_read_tools.word_live_add_comment(
                 filename, start, end, paragraph_index, text, author,
             ))

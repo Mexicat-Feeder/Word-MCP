@@ -7,7 +7,7 @@ This branch exposes only grouped `word_v2_*` MCP tools. Lower-level
 
 | Tool | Description |
 | --- | --- |
-| `word_v2_open` | List open documents, attach to active/listed documents, open files, or create default-template sessions. |
+| `word_v2_open` | List open documents, list MCP sessions, attach to active/listed documents, open files, or create default-template sessions. |
 | `word_v2_save` | Save the current session in place, save to a new file, or export PDF. |
 | `word_v2_close` | Close the Word document associated with a session. |
 
@@ -15,7 +15,7 @@ This branch exposes only grouped `word_v2_*` MCP tools. Lower-level
 
 | Tool | Description |
 | --- | --- |
-| `word_v2_get_content` | Read text, page text, document info, comments, revisions, or paragraph formatting. |
+| `word_v2_get_content` | Read text, page text, document info, comments, revisions, paragraph formatting, snapshots, or diffs. |
 | `word_v2_search` | Search text and return match handles for later edits, formatting, or comments. |
 
 ## Mutations

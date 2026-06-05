@@ -29,7 +29,10 @@ Lists, attaches, opens, or creates Word documents.
 Common calls:
 
 - `word_v2_open()` attaches to the active Word document and returns `session_id`.
-- `word_v2_open(action="list")` lists open Word documents without creating a session.
+- `word_v2_open(action="list")` lists open Word documents and current MCP
+  sessions without creating a new session.
+- `word_v2_open(action="sessions")` lists current MCP `session_id` values when
+  the agent lost track of them.
 - `word_v2_open(action="attach", path="2")` attaches to a listed document by
   `index`, `name`, or `full_path`.
 - `word_v2_open(path="contract.docx")` opens a file. Relative paths resolve
@@ -52,6 +55,8 @@ Actions:
 - `comments`: all comments.
 - `revisions`: tracked changes.
 - `paragraph_format`: paragraph/run formatting diagnostics.
+- `snapshot`: stores a baseline for later diffing.
+- `diff`: returns paragraphs changed since the last snapshot.
 
 ### `word_v2_search`
 
@@ -79,7 +84,16 @@ Actions:
 - `insert_paragraphs`: insert paragraph list at start/end or near text/index.
 - `undo`: undo recent Word operations.
 
-Use `track_changes=true` for suggested edits.
+Use `track_changes=true` for suggested edits. Public v2 `paragraph_index`
+values are 1-based, matching `word_v2_get_content` output.
+
+For long grammar edits, avoid `find_text` strings over 255 characters because
+Word's native Find API rejects them. Use one of these patterns instead:
+
+- Search a short unique anchor, then edit the returned `handle`.
+- Replace a whole paragraph with
+  `word_v2_edit(action="replace", paragraph_index=3, text="...", track_changes=true)`.
+- Use `word_v2_get_content(action="page_text")` to get `start`/`end` offsets.
 
 ### `word_v2_format`
 
@@ -235,9 +249,21 @@ Example:
   "action": "apply",
   "operations": [
     { "tool": "edit", "action": "replace", "handle": "match_1", "text": "NewCo Inc.", "track_changes": true },
-    { "tool": "comment", "action": "create", "handle": "match_1", "comment_text": "Updated party name." }
+    { "tool": "comment", "action": "create", "handle": "match_1", "text": "Updated party name." }
   ]
 }
+```
+
+For review workflows, call `word_v2_get_content` to take a snapshot before
+edits, apply a batch, then call `word_v2_get_content` again to inspect the
+diff:
+
+```json
+{ "session_id": "word_abc123", "action": "snapshot" }
+```
+
+```json
+{ "session_id": "word_abc123", "action": "diff" }
 ```
 
 ## Agent Rules
@@ -250,6 +276,8 @@ Example:
 - Search before editing unless the user gives exact `start/end`.
 - Prefer `handle` over offsets.
 - Re-search after edits because offsets can move.
+- Use `word_v2_mutations` for batches of edits/comments instead of one tool
+  call per change.
 - Use `track_changes=true` for user-reviewable edits.
 - Save only after validation.
 - Close with `save_changes="discard"` if validation shows a bad edit and undo

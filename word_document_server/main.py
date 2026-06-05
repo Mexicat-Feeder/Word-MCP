@@ -60,7 +60,7 @@ def register_tools() -> None:
         password: str | None = None,
         action: str = "open",
     ):
-        """Open, attach to, list, or create Word documents in live mode."""
+        """Open, attach to, list, list sessions, or create Word documents in live mode."""
         return await live_v2_tools.word_v2_open(
             path=path,
             directory=directory,
@@ -105,7 +105,7 @@ def register_tools() -> None:
         end_paragraph: int = None,
         include_runs: bool = False,
     ):
-        """Read text, page text, info, comments, revisions, or paragraph formatting."""
+        """Read text, page text, info, comments, revisions, paragraph formatting, snapshots, or diffs."""
         return await live_v2_tools.word_v2_get_content(
             session_id=session_id,
             action=action,

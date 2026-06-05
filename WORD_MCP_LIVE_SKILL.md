@@ -108,6 +108,12 @@ If the document is already open, call `mcp_word_word_v2_open` with:
 {"action": "list"}
 ```
 
+If you lost the current `session_id`, call:
+
+```json
+{"action": "sessions"}
+```
+
 Then attach by index, name, or full path with `mcp_word_word_v2_open`:
 
 ```json
@@ -163,6 +169,34 @@ Call `mcp_word_word_v2_comment`:
 }
 ```
 
+For many edits, use `mcp_word_word_v2_mutations` instead of one call per
+change. Each operation uses the same arguments as its grouped v2 tool:
+
+```json
+{
+  "session_id": "word_abc",
+  "action": "apply",
+  "operations": [
+    {
+      "tool": "edit",
+      "action": "replace",
+      "handle": "match_1",
+      "text": "new text",
+      "track_changes": true
+    },
+    {
+      "tool": "comment",
+      "action": "create",
+      "handle": "match_1",
+      "text": "Why this changed."
+    }
+  ]
+}
+```
+
+For before/after checking, call `mcp_word_word_v2_get_content` with
+`{"action":"snapshot"}` before edits and `{"action":"diff"}` after edits.
+
 ## Structured Creation Or Recreation
 
 Use `mcp_word_word_v2_blueprint` for structured document creation and faithful
@@ -213,6 +247,27 @@ Preserve these fields exactly when replaying inspected blueprints:
 
 Do not simplify values that look strange. Word positioning values such as
 `left_pt: -999995.0` can be valid and should be replayed as-is.
+
+## Pitfalls And Limits
+
+- **`find_text` is capped at 255 characters** in `mcp_word_word_v2_edit` with
+  `action='replace'` because Word's native Find API has that limit. Do not
+  blindly split a paragraph into tiny chunks. Search a short unique anchor and
+  edit with the returned `handle`, use `start`/`end` from
+  `mcp_word_word_v2_get_content(action='page_text')`, or replace a whole
+  paragraph with `paragraph_index`.
+- **Comments require a target**: provide a `handle`, `target`, `start`/`end`,
+  or `paragraph_index`. A `handle` from `mcp_word_word_v2_search` is valid and
+  is usually the easiest target.
+- **Paragraph indexes in v2 are 1-based**: use the `index` returned by
+  `mcp_word_word_v2_get_content`; paragraph 1 is the first paragraph.
+- **Tracked changes are explicit**: pass `track_changes=true` on edit/format
+  calls that support it, or call `mcp_word_word_v2_track_changes` with
+  `action='toggle', enable=true` before a review batch. Edits made without one
+  of those are applied silently.
+- **Handle reuse**: a `handle` from `mcp_word_word_v2_search` can be reused
+  across `edit`, `comment`, and `format` calls in the same session, but
+  re-search if the document state may have changed between calls.
 
 ## If A Tool Call Fails
 

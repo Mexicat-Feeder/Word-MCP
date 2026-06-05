@@ -103,6 +103,11 @@ def test_open_without_path_attaches_active_document(monkeypatch):
 
 
 def test_open_action_list_returns_documents_without_session(monkeypatch):
+    existing_session = live_v2_tools._register_session({
+        "document": "Existing.docx",
+        "full_path": r"C:\Docs\Existing.docx",
+    })
+
     async def fake_list_open():
         return json.dumps({
             "success": True,
@@ -119,8 +124,29 @@ def test_open_action_list_returns_documents_without_session(monkeypatch):
     assert result["success"] is True
     assert result["count"] == 1
     assert result["documents"][0]["active"] is True
+    assert result["session_count"] == 1
+    assert result["sessions"][0]["session_id"] == existing_session
     assert "session_id" not in result
     assert "word_v2_open()" in result["usage"]
+
+
+def test_open_action_sessions_returns_registered_sessions():
+    session_id = live_v2_tools._register_session({
+        "document": "Source.docx",
+        "full_path": r"C:\Docs\Source.docx",
+    })
+    live_v2_tools._handles[session_id]["match_1"] = {
+        "target": {"kind": "selection", "start": 1, "end": 5}
+    }
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="sessions")))
+
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert result["sessions"][0]["session_id"] == session_id
+    assert result["sessions"][0]["filename"] == "Source.docx"
+    assert result["sessions"][0]["full_path"] == r"C:\Docs\Source.docx"
+    assert result["sessions"][0]["handle_count"] == 1
 
 
 def test_open_action_attach_uses_listed_document_identity(monkeypatch):
@@ -166,6 +192,149 @@ def test_open_action_new_explicitly_creates_blank_document(monkeypatch):
     assert result["template"] == "default_plain"
     assert result["template_result"]["success"] is True
     assert result["session_id"].startswith("word_")
+
+
+def test_get_content_snapshot_and_diff_delegate_to_live_read_tools(monkeypatch):
+    session_id = live_v2_tools._register_session({
+        "document": "Source.docx",
+        "full_path": r"C:\Docs\Source.docx",
+    })
+    calls = []
+
+    async def fake_snapshot(filename):
+        calls.append(("snapshot", filename))
+        return json.dumps({"success": True, "snapshot_timestamp": 123})
+
+    async def fake_diff(filename):
+        calls.append(("diff", filename))
+        return json.dumps({"success": True, "changes": [{"paragraph_index": 1}]})
+
+    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_take_snapshot", fake_snapshot)
+    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_get_diff", fake_diff)
+
+    snapshot = json.loads(asyncio.run(live_v2_tools.word_v2_get_content(session_id, action="snapshot")))
+    diff = json.loads(asyncio.run(live_v2_tools.word_v2_get_content(session_id, action="diff")))
+
+    assert snapshot["success"] is True
+    assert snapshot["session_id"] == session_id
+    assert diff["changes"] == [{"paragraph_index": 1}]
+    assert calls == [
+        ("snapshot", r"C:\Docs\Source.docx"),
+        ("diff", r"C:\Docs\Source.docx"),
+    ]
+
+
+def test_search_rejects_overlong_find_text_with_actionable_usage():
+    session_id = live_v2_tools._register_session({"document": "Source.docx"})
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_search(
+        session_id=session_id,
+        find_text="x" * 256,
+    )))
+
+    assert "Word Find limit" in result["error"]
+    assert "word_v2_search" in result["alternatives"][0]
+    assert "paragraph_index" in result["usage"]
+
+
+def test_replace_with_overlong_find_text_returns_actionable_usage():
+    session_id = live_v2_tools._register_session({"document": "Source.docx"})
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_edit(
+        session_id=session_id,
+        action="replace",
+        find_text="x" * 256,
+        text="replacement",
+    )))
+
+    assert "Word Find limit" in result["error"]
+    assert "paragraph_index" in result["usage"]
+
+
+def test_replace_can_target_one_based_paragraph_index(monkeypatch):
+    session_id = live_v2_tools._register_session({
+        "document": "Source.docx",
+        "full_path": r"C:\Docs\Source.docx",
+    })
+    calls = []
+
+    def fake_resolve_paragraph_target(filename, paragraph_index):
+        calls.append(("target", filename, paragraph_index))
+        return {"kind": "selection", "start": 10, "end": 30}
+
+    async def fake_delete(filename, start, end, track_changes):
+        calls.append(("delete", filename, start, end, track_changes))
+        return json.dumps({"success": True, "deleted_text": "old paragraph"})
+
+    async def fake_insert(filename, text, position, bookmark, track_changes):
+        calls.append(("insert", filename, text, position, bookmark, track_changes))
+        return json.dumps({"success": True, "inserted_text": text})
+
+    monkeypatch.setattr(live_v2_tools, "_resolve_paragraph_target", fake_resolve_paragraph_target)
+    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_delete_text", fake_delete)
+    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_insert_text", fake_insert)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_edit(
+        session_id=session_id,
+        action="replace",
+        paragraph_index=3,
+        text="new paragraph",
+        track_changes=True,
+    )))
+
+    assert result["success"] is True
+    assert calls == [
+        ("target", r"C:\Docs\Source.docx", 3),
+        ("delete", r"C:\Docs\Source.docx", 10, 30, True),
+        ("insert", r"C:\Docs\Source.docx", "new paragraph", "10", None, True),
+    ]
+
+
+def test_insert_paragraphs_uses_one_based_v2_paragraph_index(monkeypatch):
+    session_id = live_v2_tools._register_session({
+        "document": "Source.docx",
+        "full_path": r"C:\Docs\Source.docx",
+    })
+    calls = []
+
+    async def fake_insert_paragraphs(filename, paragraphs, target_text, target_paragraph_index, position, style, track_changes):
+        calls.append((filename, paragraphs, target_text, target_paragraph_index, position, style, track_changes))
+        return json.dumps({"success": True, "inserted_count": len(paragraphs)})
+
+    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_insert_paragraphs", fake_insert_paragraphs)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_edit(
+        session_id=session_id,
+        action="insert_paragraphs",
+        paragraphs=["Inserted"],
+        paragraph_index=2,
+        position="after",
+        style="Normal",
+        track_changes=True,
+    )))
+
+    assert result["success"] is True
+    assert calls == [
+        (r"C:\Docs\Source.docx", ["Inserted"], None, 1, "after", "Normal", True),
+    ]
+
+
+def test_comment_create_without_target_returns_usage_before_live_call(monkeypatch):
+    session_id = live_v2_tools._register_session({"document": "Source.docx"})
+
+    async def fail_add_comment(*_args, **_kwargs):
+        raise AssertionError("word_v2_comment should validate missing targets before calling live add_comment")
+
+    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_add_comment", fail_add_comment)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_comment(
+        session_id=session_id,
+        action="create",
+        text="Needs clarification.",
+    )))
+
+    assert result["error"] == "Comment target required"
+    assert "paragraph_index" in result["usage"]
 
 
 def test_blueprint_validation_rejects_unknown_blocks_and_bad_tables():
