@@ -17,7 +17,7 @@ wheels/
 .idea
 
 # Local MCP config (contains user-specific paths)
-mcp-config.json
+mcp-config*.json
 
 # MCP Registry tokens (secrets)
 .mcpregistry_*

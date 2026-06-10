@@ -48,6 +48,31 @@ cd Word-MCP
 uv sync
 ```
 
+## One-Step Windows Install
+
+For a fresh Windows machine, run the installer script from the repo root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-word-mcp.ps1
+```
+
+The script:
+
+- Installs `uv` if it is missing.
+- Installs the Python version from `.python-version` with `uv`.
+- Runs `uv sync`.
+- Creates a default `.env` if one does not already exist.
+- Runs smoke tests unless `-SkipTests` is passed.
+- Writes and prints `mcp-config.json` for MCP clients.
+
+Useful options:
+
+```powershell
+.\scripts\install-word-mcp.ps1 -Author "Your Name" -AuthorInitials "YN"
+.\scripts\install-word-mcp.ps1 -SkipTests
+.\scripts\install-word-mcp.ps1 -Transport streamable-http -HostAddress 127.0.0.1 -Port 8000
+```
+
 ## Run With Stdio
 
 ```powershell
