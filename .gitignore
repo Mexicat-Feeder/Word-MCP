@@ -18,6 +18,7 @@ wheels/
 
 # Local MCP config (contains user-specific paths)
 mcp-config*.json
+hermes-word-mcp*.json
 
 # MCP Registry tokens (secrets)
 .mcpregistry_*

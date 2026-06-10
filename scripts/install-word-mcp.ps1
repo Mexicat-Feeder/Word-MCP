@@ -3,14 +3,15 @@ param(
     [ValidateSet("stdio", "streamable-http", "sse")]
     [string]$Transport = "stdio",
 
-    [string]$ServerName = "word",
     [string]$Author = "",
     [string]$AuthorInitials = "",
     [string]$HostAddress = "127.0.0.1",
     [int]$Port = 8000,
     [string]$McpPath = "/mcp",
     [string]$SsePath = "/sse",
-    [string]$ConfigOut = "mcp-config.json",
+    [string]$ConfigOut = "hermes-word-mcp.json",
+    [int]$Timeout = 180,
+    [int]$ConnectTimeout = 30,
 
     [switch]$SkipUvInstall,
     [switch]$SkipTests
@@ -91,9 +92,20 @@ function Invoke-Uv {
 
     Push-Location -LiteralPath $WorkingDirectory
     try {
-        & $UvPath @Arguments
-        if ($LASTEXITCODE -ne 0) {
-            throw "uv $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $output = & $UvPath @Arguments 2>&1
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        if ($output) {
+            $output | ForEach-Object { Write-Host $_ }
+        }
+        if ($exitCode -ne 0) {
+            throw "uv $($Arguments -join ' ') failed with exit code $exitCode"
         }
     }
     finally {
@@ -144,25 +156,31 @@ function Ensure-DefaultEnvFile {
     Write-Host "Wrote default .env"
 }
 
-function New-McpConfig {
+function Get-ProjectPythonPath {
+    param([string]$RepoRoot)
+
+    if ($IsWindows -or $env:OS -eq "Windows_NT") {
+        return (Join-Path $RepoRoot ".venv\Scripts\python.exe")
+    }
+    return (Join-Path $RepoRoot ".venv/bin/python")
+}
+
+function New-HermesMcpConfig {
     param(
         [string]$RepoRoot,
-        [string]$UvPath,
-        [string]$ServerName,
+        [string]$PythonPath,
         [string]$Transport,
-        [string]$Author,
-        [string]$AuthorInitials,
         [string]$HostAddress,
         [int]$Port,
         [string]$McpPath,
-        [string]$SsePath
+        [string]$SsePath,
+        [int]$Timeout,
+        [int]$ConnectTimeout
     )
 
     $envConfig = [ordered]@{
         MCP_TRANSPORT = $Transport
-        MCP_AUTHOR = $Author
-        MCP_AUTHOR_INITIALS = $AuthorInitials
-        PYTHONIOENCODING = "utf-8"
+        PYTHONPATH = $RepoRoot
     }
 
     if ($Transport -eq "streamable-http") {
@@ -177,20 +195,14 @@ function New-McpConfig {
     }
 
     return [ordered]@{
-        mcpServers = [ordered]@{
-            $ServerName = [ordered]@{
-                command = $UvPath
-                args = @(
-                    "--directory",
-                    $RepoRoot,
-                    "run",
-                    "python",
-                    "-m",
-                    "word_document_server.main"
-                )
-                env = $envConfig
-            }
-        }
+        command = $PythonPath
+        args = @(
+            "-m",
+            "word_document_server.main"
+        )
+        env = $envConfig
+        timeout = $Timeout
+        connect_timeout = $ConnectTimeout
     }
 }
 
@@ -235,6 +247,11 @@ Invoke-Uv -UvPath $uvPath -Arguments @("python", "install", $requiredPython) -Wo
 Write-Step "Syncing project dependencies"
 Invoke-Uv -UvPath $uvPath -Arguments @("sync") -WorkingDirectory $repoRoot
 
+$pythonPath = Get-ProjectPythonPath -RepoRoot $repoRoot
+if (-not (Test-Path -LiteralPath $pythonPath)) {
+    throw "Expected project Python was not found at $pythonPath after uv sync."
+}
+
 Ensure-DefaultEnvFile `
     -RepoRoot $repoRoot `
     -Transport $Transport `
@@ -251,17 +268,16 @@ if (-not $SkipTests) {
     Invoke-Uv -UvPath $uvPath -Arguments @("run", "python", "-m", "pytest", "-q") -WorkingDirectory $repoRoot
 }
 
-$config = New-McpConfig `
+$config = New-HermesMcpConfig `
     -RepoRoot $repoRoot `
-    -UvPath $uvPath `
-    -ServerName $ServerName `
+    -PythonPath $pythonPath `
     -Transport $Transport `
-    -Author $Author `
-    -AuthorInitials $AuthorInitials `
     -HostAddress $HostAddress `
     -Port $Port `
     -McpPath $McpPath `
-    -SsePath $SsePath
+    -SsePath $SsePath `
+    -Timeout $Timeout `
+    -ConnectTimeout $ConnectTimeout
 
 $configJson = $config | ConvertTo-Json -Depth 20
 $configPath = if ([IO.Path]::IsPathRooted($ConfigOut)) {
@@ -272,12 +288,8 @@ else {
 }
 Set-Content -LiteralPath $configPath -Value $configJson -Encoding UTF8
 
-Write-Step "MCP client config"
+Write-Step "Hermes-specific MCP config"
 Write-Host "Wrote: $configPath"
+Write-Host "This output is Hermes-specific. Add it as the server entry for your Hermes 'word' MCP server." -ForegroundColor Green
 Write-Host ""
 Write-Output $configJson
-
-Write-Host ""
-Write-Host "MCP Inspector stdio fields:" -ForegroundColor Green
-Write-Host "Command: $uvPath"
-Write-Host "Arguments: --directory `"$repoRoot`" run python -m word_document_server.main"

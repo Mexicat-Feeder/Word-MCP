@@ -63,7 +63,7 @@ The script:
 - Runs `uv sync`.
 - Creates a default `.env` if one does not already exist.
 - Runs smoke tests unless `-SkipTests` is passed.
-- Writes and prints `mcp-config.json` for MCP clients.
+- Writes and prints `hermes-word-mcp.json` in Hermes server-entry format.
 
 Useful options:
 
@@ -71,6 +71,24 @@ Useful options:
 .\scripts\install-word-mcp.ps1 -Author "Your Name" -AuthorInitials "YN"
 .\scripts\install-word-mcp.ps1 -SkipTests
 .\scripts\install-word-mcp.ps1 -Transport streamable-http -HostAddress 127.0.0.1 -Port 8000
+```
+
+The final config output is Hermes-specific:
+
+```json
+{
+  "command": "C:\\path\\to\\Word-MCP\\.venv\\Scripts\\python.exe",
+  "args": [
+    "-m",
+    "word_document_server.main"
+  ],
+  "env": {
+    "MCP_TRANSPORT": "stdio",
+    "PYTHONPATH": "C:\\path\\to\\Word-MCP"
+  },
+  "timeout": 180,
+  "connect_timeout": 30
+}
 ```
 
 ## Run With Stdio
