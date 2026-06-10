@@ -32,24 +32,49 @@ def _word_specials_to_text(text: str) -> str:
     )
 
 
+def _normalize_paragraph_insert_items(paragraphs: list, fallback_style: str = None) -> list[dict]:
+    """Normalize paragraph strings or {text, style} objects for COM insertion."""
+    items = []
+    for index, paragraph in enumerate(paragraphs or []):
+        if isinstance(paragraph, dict):
+            if "text" not in paragraph:
+                raise ValueError(f"paragraphs[{index}] object requires a 'text' field")
+            text = paragraph.get("text")
+            item_style = paragraph.get("style") or fallback_style
+        else:
+            text = paragraph
+            item_style = fallback_style
+
+        if text is None:
+            text = ""
+        cleaned = str(text).replace("\r\n", "\r").replace("\n", "\r").rstrip("\r")
+        items.append({"text": cleaned, "style": item_style})
+    return items
+
+
 def _paragraph_insert_payload(paragraphs: list) -> str:
     """Build Word paragraph text that keeps inserted paragraphs separate."""
     cleaned = [
-        str(p).replace("\r\n", "\r").replace("\n", "\r").rstrip("\r")
-        for p in paragraphs
+        item["text"]
+        for item in _normalize_paragraph_insert_items(paragraphs)
     ]
     return "\r".join(cleaned) + "\r"
 
 
-def _style_inserted_paragraphs(doc, start: int, end: int, style_name: str) -> None:
+def _style_inserted_paragraphs(doc, start: int, end: int, style_name: str, paragraph_styles: list = None) -> None:
     """Best-effort style application for paragraphs just inserted through COM."""
-    if not style_name:
+    if not style_name and not paragraph_styles:
         return
     try:
         rng = doc.Range(start, end)
         for i in range(1, rng.Paragraphs.Count + 1):
+            selected_style = style_name
+            if paragraph_styles and i <= len(paragraph_styles) and paragraph_styles[i - 1]:
+                selected_style = paragraph_styles[i - 1]
+            if not selected_style:
+                continue
             try:
-                rng.Paragraphs(i).Range.Style = style_name
+                rng.Paragraphs(i).Range.Style = selected_style
             except Exception:
                 pass
     except Exception:
@@ -1156,6 +1181,12 @@ async def word_live_insert_paragraphs(
                 return json.dumps({"error": f"No paragraph found containing '{target_text}'"})
 
         resolved_style = style if style else "Normal"
+        try:
+            paragraph_items = _normalize_paragraph_insert_items(paragraphs, resolved_style)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+        payload = "\r".join(item["text"] for item in paragraph_items) + "\r"
+        paragraph_styles = [item.get("style") for item in paragraph_items]
 
         with undo_record(app, "MCP: Insert Paragraphs"):
             prev_tracking = doc.TrackRevisions
@@ -1165,36 +1196,35 @@ async def word_live_insert_paragraphs(
                 app.UserName = DEFAULT_AUTHOR
 
             try:
-                payload = _paragraph_insert_payload(paragraphs)
                 if position == "end":
                     insert_at = max(doc.Content.Start, doc.Content.End - 1)
                     rng = doc.Range(insert_at, insert_at)
                     rng.InsertAfter(payload)
                     _style_inserted_paragraphs(
-                        doc, insert_at, insert_at + len(payload), resolved_style
+                        doc, insert_at, insert_at + len(payload), resolved_style, paragraph_styles
                     )
                 elif position == "start":
                     insert_at = doc.Content.Start
                     rng = doc.Range(insert_at, insert_at)
                     rng.InsertBefore(payload)
                     _style_inserted_paragraphs(
-                        doc, insert_at, insert_at + len(payload), resolved_style
+                        doc, insert_at, insert_at + len(payload), resolved_style, paragraph_styles
                     )
                 elif position == "after":
                     insert_at = min(target_para.Range.End, doc.Content.End - 1)
                     rng = doc.Range(insert_at, insert_at)
                     rng.InsertAfter(payload)
                     _style_inserted_paragraphs(
-                        doc, insert_at, insert_at + len(payload), resolved_style
+                        doc, insert_at, insert_at + len(payload), resolved_style, paragraph_styles
                     )
                 else:  # "before"
                     insert_at = target_para.Range.Start
                     rng = doc.Range(insert_at, insert_at)
                     rng.InsertBefore(payload)
                     _style_inserted_paragraphs(
-                        doc, insert_at, insert_at + len(payload), resolved_style
+                        doc, insert_at, insert_at + len(payload), resolved_style, paragraph_styles
                     )
-                inserted = len(paragraphs)
+                inserted = len(paragraph_items)
             finally:
                 doc.TrackRevisions = prev_tracking
                 if track_changes:

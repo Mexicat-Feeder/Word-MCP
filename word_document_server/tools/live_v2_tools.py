@@ -1428,6 +1428,27 @@ def _lower_insert_paragraph_index(paragraph_index: int | None) -> int | None:
     return paragraph_index - 1
 
 
+def _normalize_mutation_tool_name(tool: str) -> str:
+    normalized = (tool or "").lower().strip()
+    if normalized.startswith("mcp_word_"):
+        normalized = normalized[len("mcp_word_"):]
+    if normalized.startswith("word_v2_"):
+        normalized = normalized[len("word_v2_"):]
+    return {
+        "comments": "comment",
+        "revision": "track_changes",
+        "revisions": "track_changes",
+        "track": "track_changes",
+        "track_change": "track_changes",
+        "tables": "table",
+        "images": "media",
+        "image": "media",
+        "picture": "media",
+        "pictures": "media",
+        "properties": "layout",
+    }.get(normalized, normalized)
+
+
 async def word_v2_open(
     path: str = None,
     directory: str = ".",
@@ -1935,6 +1956,11 @@ async def word_v2_table(
         "get_info", "set_cell", "set_row", "set_range", "add_row", "delete_row",
         "add_column", "delete_column", "merge_cells", "autofit", "delete_table",
     }:
+        if action == "delete_column" and col is None:
+            return _dump({
+                "error": "delete_column requires col",
+                "usage": "Pass the 1-based column number, e.g. word_v2_table(session_id, action='delete_column', table_index=1, col=2).",
+            })
         result = _load_result(await live_tools.word_live_modify_table(
             filename, table_index, action, row, col, text, row, col, None, cells,
             start_row, start_col, end_row, end_col, autofit, False, track_changes,
@@ -2036,7 +2062,8 @@ async def word_v2_mutations(
 
     results = []
     for i, operation in enumerate(operations):
-        tool = (operation.get("tool") or "").lower()
+        requested_tool = operation.get("tool") or ""
+        tool = _normalize_mutation_tool_name(requested_tool)
         args = {k: v for k, v in operation.items() if k != "tool"}
         args["session_id"] = session_id
         if tool == "edit":
@@ -2054,9 +2081,13 @@ async def word_v2_mutations(
         elif tool == "layout":
             raw = await word_v2_layout(**args)
         else:
-            raw = _dump({"error": f"Invalid operation tool at index {i}: {tool}"})
+            raw = _dump({
+                "error": f"Invalid operation tool at index {i}: {requested_tool}",
+                "valid_tools": ["edit", "format", "comment", "track_changes", "table", "media", "layout"],
+                "usage": "Use short names like 'edit' or full public names like 'word_v2_edit'.",
+            })
         result = _load_result(raw)
-        results.append({"index": i, "tool": tool, "result": result})
+        results.append({"index": i, "tool": tool, "requested_tool": requested_tool, "result": result})
         if result.get("error"):
             return _dump({"success": False, "session_id": session_id, "results": results})
 
@@ -2086,7 +2117,9 @@ async def word_v2_layout(
 ) -> str:
     """Manage page setup, breaks, and document properties for a live session."""
     action = (action or "").lower()
-    valid_actions = ["page_setup", "page_break", "section_break", "properties"]
+    if action == "break":
+        action = "page_break" if (break_type or "").lower() in {"", "page", "page_break", "manual_page"} else "section_break"
+    valid_actions = ["page_setup", "page_break", "section_break", "properties", "break"]
     if action not in valid_actions:
         return _dump({"error": "Invalid action", "valid_actions": valid_actions})
 

@@ -170,7 +170,9 @@ Call `mcp_word_word_v2_comment`:
 ```
 
 For many edits, use `mcp_word_word_v2_mutations` instead of one call per
-change. Each operation uses the same arguments as its grouped v2 tool:
+change. Each operation uses the same arguments as its grouped v2 tool. The
+`tool` field accepts short names such as `edit` or full public names such as
+`word_v2_edit` and `mcp_word_word_v2_edit`:
 
 ```json
 {
@@ -261,6 +263,11 @@ Do not simplify values that look strange. Word positioning values such as
   is usually the easiest target.
 - **Paragraph indexes in v2 are 1-based**: use the `index` returned by
   `mcp_word_word_v2_get_content`; paragraph 1 is the first paragraph.
+- **`insert_paragraphs` accepts strings or objects**: use strings for simple
+  paragraphs, or `{ "text": "Heading", "style": "Heading 1" }` objects when
+  each paragraph needs its own style.
+- **Layout breaks are explicit**: prefer `page_break` or `section_break`. The
+  generic `break` alias also works; pass `break_type="page"` for a page break.
 - **Tracked changes are explicit**: pass `track_changes=true` on edit/format
   calls that support it, or call `mcp_word_word_v2_track_changes` with
   `action='toggle', enable=true` before a review batch. Edits made without one

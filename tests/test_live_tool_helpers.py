@@ -1,6 +1,7 @@
 from word_document_server.tools.live_tools import (
     _coerce_int_list,
     _coerce_table_entry,
+    _normalize_paragraph_insert_items,
     _paragraph_insert_payload,
     _word_specials_to_text,
 )
@@ -20,6 +21,27 @@ def test_paragraph_insert_payload_normalizes_existing_newlines():
     payload = _paragraph_insert_payload(["First\nline", "Second\r\nline\r"])
 
     assert payload == "First\rline\rSecond\rline\r"
+
+
+def test_paragraph_insert_payload_extracts_text_from_agent_dicts():
+    payload = _paragraph_insert_payload([
+        {"style": "Heading 1", "text": "This is a test."},
+        {"style": "Normal", "text": "Second paragraph."},
+    ])
+
+    assert payload == "This is a test.\rSecond paragraph.\r"
+
+
+def test_normalize_paragraph_insert_items_preserves_per_item_style():
+    items = _normalize_paragraph_insert_items([
+        {"style": "Heading 1", "text": "Title"},
+        "Body",
+    ], fallback_style="Normal")
+
+    assert items == [
+        {"text": "Title", "style": "Heading 1"},
+        {"text": "Body", "style": "Normal"},
+    ]
 
 
 def test_coerce_int_list_accepts_string_numbers():

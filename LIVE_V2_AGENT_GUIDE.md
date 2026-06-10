@@ -84,6 +84,9 @@ Actions:
 - `insert_paragraphs`: insert paragraph list at start/end or near text/index.
 - `undo`: undo recent Word operations.
 
+For `insert_paragraphs`, `paragraphs` may be a list of strings or a list of
+objects such as `{ "text": "Heading", "style": "Heading 1" }`.
+
 Use `track_changes=true` for suggested edits. Public v2 `paragraph_index`
 values are 1-based, matching `word_v2_get_content` output.
 
@@ -143,6 +146,7 @@ Actions:
 
 Table row and column indexes follow the underlying live COM table tools:
 generally 1-based for live table modification.
+For `delete_column`, pass `col` with the 1-based column number.
 
 ### `word_v2_media`
 
@@ -184,6 +188,9 @@ Actions:
 - `page_setup`: set page size, orientation, and margins.
 - `page_break`: insert a manual page break.
 - `section_break`: insert a section break.
+- `break`: compatibility alias. Use `break_type="page"` for a page break, or
+  a Word section break type such as `next_page`, `continuous`, `even_page`, or
+  `odd_page` for a section break.
 - `properties`: set document properties such as title, subject, author, or company.
 
 Use this when document structure matters more than text edits alone.
@@ -240,6 +247,8 @@ bullets or numbered list items in the reference.
 
 Use `action="preview"` to inspect a batch shape without changing the document.
 Use `action="apply"` to execute operations in order.
+Operation `tool` may use short names (`edit`, `comment`, `layout`) or public
+tool names (`word_v2_edit`, `mcp_word_word_v2_edit`).
 
 Example:
 

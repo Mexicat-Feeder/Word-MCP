@@ -700,6 +700,81 @@ def test_layout_invalid_action_does_not_require_session():
     assert "page_setup" in result["valid_actions"]
 
 
+def test_table_delete_column_requires_col_before_live_call(monkeypatch):
+    session_id = live_v2_tools._register_session({
+        "document": "Doc.docx",
+        "full_path": r"C:\Docs\Doc.docx",
+    })
+
+    async def fail_modify_table(*_args, **_kwargs):
+        raise AssertionError("word_v2_table should validate delete_column col before COM call")
+
+    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_modify_table", fail_modify_table)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_table(
+        session_id=session_id,
+        action="delete_column",
+    )))
+
+    assert result["error"] == "delete_column requires col"
+    assert "col=2" in result["usage"]
+
+
+def test_layout_break_alias_inserts_page_break(monkeypatch):
+    session_id = live_v2_tools._register_session({
+        "document": "Doc.docx",
+        "full_path": r"C:\Docs\Doc.docx",
+    })
+    calls = []
+
+    def fake_insert_break(filename, break_kind, position="end", paragraph_index=None, break_type="next_page"):
+        calls.append((filename, break_kind, position, paragraph_index, break_type))
+        return {"success": True, "break": break_kind}
+
+    monkeypatch.setattr(live_v2_tools, "_layout_insert_break_live", fake_insert_break)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_layout(
+        session_id=session_id,
+        action="break",
+        break_type="page",
+        position="end",
+    )))
+
+    assert result["success"] is True
+    assert result["break"] == "page"
+    assert calls == [(r"C:\Docs\Doc.docx", "page", "end", None, "next_page")]
+
+
+def test_mutations_accept_full_public_tool_names(monkeypatch):
+    calls = []
+
+    async def fake_edit(**kwargs):
+        calls.append(kwargs)
+        return json.dumps({"success": True, "session_id": kwargs["session_id"]})
+
+    monkeypatch.setattr(live_v2_tools, "word_v2_edit", fake_edit)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_mutations(
+        session_id="word_123",
+        action="apply",
+        operations=[
+            {"tool": "word_v2_edit", "action": "insert", "text": "Hello"},
+            {"tool": "mcp_word_word_v2_edit", "action": "insert", "text": "World"},
+        ],
+    )))
+
+    assert result["success"] is True
+    assert [entry["tool"] for entry in result["results"]] == ["edit", "edit"]
+    assert [entry["requested_tool"] for entry in result["results"]] == [
+        "word_v2_edit",
+        "mcp_word_word_v2_edit",
+    ]
+    assert calls == [
+        {"action": "insert", "text": "Hello", "session_id": "word_123"},
+        {"action": "insert", "text": "World", "session_id": "word_123"},
+    ]
+
+
 def test_media_insert_delegates_to_live_image_tool(monkeypatch):
     session_id = live_v2_tools._register_session({
         "document": "Doc.docx",

@@ -22,16 +22,16 @@ This branch exposes only grouped `word_v2_*` MCP tools. Lower-level
 
 | Tool | Description |
 | --- | --- |
-| `word_v2_edit` | Insert, replace, delete, insert paragraphs, undo, add hyperlinks, add footnotes, or delete footnotes. |
+| `word_v2_edit` | Insert, replace, delete, insert paragraphs, undo, add hyperlinks, add footnotes, or delete footnotes. `insert_paragraphs` accepts strings or `{text, style}` objects. |
 | `word_v2_format` | Format inline text, paragraphs, styles, and lists. |
 | `word_v2_comment` | Create, reply to, resolve, delete, list, or get comments. |
 | `word_v2_track_changes` | Toggle, list, accept, reject, or decide tracked changes. |
 | `word_v2_table` | Create, inspect, edit, or format tables. |
 | `word_v2_media` | Insert images with sizing, alignment, wrapping, floating placement, and optional borders. |
-| `word_v2_layout` | Set page setup, insert page/section breaks, or set document properties. |
+| `word_v2_layout` | Set page setup, insert page/section breaks, accept `break` as an alias, or set document properties. |
 | `word_v2_blueprint` | Create, inspect, validate, or export structured/page-aware document blueprints. |
 | `word_v2_protection` | Protect or unprotect a document. |
-| `word_v2_mutations` | Preview or apply multiple v2 operations in order. |
+| `word_v2_mutations` | Preview or apply multiple v2 operations in order. Operation tools can be short names or public `word_v2_*` names. |
 
 ## Compatibility Policy
 
