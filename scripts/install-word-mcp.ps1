@@ -21,7 +21,8 @@ param(
     [switch]$SkipUvInstall,
     [switch]$SkipTests,
     [switch]$SkipRegister,
-    [switch]$SkipProbe
+    [switch]$SkipProbe,
+    [switch]$SkipSkillInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -212,6 +213,86 @@ function Get-ProjectScriptPath {
         return (Join-Path $RepoRoot ".venv\Scripts\$ScriptName.exe")
     }
     return (Join-Path $RepoRoot ".venv/bin/$ScriptName")
+}
+
+function Get-UserHomePath {
+    if ($env:USERPROFILE) {
+        return $env:USERPROFILE
+    }
+    if ($HOME) {
+        return $HOME
+    }
+    throw "Could not resolve the current user's home directory."
+}
+
+function Get-WordMcpSkillSourcePath {
+    param([string]$RepoRoot)
+
+    $skillPath = Join-Path $RepoRoot "WORD_MCP_LIVE_SKILL.md"
+    if (-not (Test-Path -LiteralPath $skillPath)) {
+        throw "Expected Word MCP skill file was not found at $skillPath"
+    }
+    return $skillPath
+}
+
+function Install-AgentSkillFile {
+    param(
+        [string]$ClientName,
+        [string]$SourcePath,
+        [string]$DestinationPath
+    )
+
+    $destinationDir = Split-Path -Parent $DestinationPath
+    New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+    Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
+    Write-Host "Installed Word MCP skill for ${ClientName}: $DestinationPath" -ForegroundColor Green
+}
+
+function Enable-HermesSkill {
+    if (-not $env:LOCALAPPDATA) {
+        return
+    }
+
+    $configPath = Join-Path $env:LOCALAPPDATA "hermes\config.yaml"
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        Write-Host "Hermes config.yaml was not found; copied skill file but could not update disabled skill list."
+        return
+    }
+
+    $lines = Get-Content -LiteralPath $configPath
+    $filtered = @($lines | Where-Object { $_ -notmatch '^\s*-\s+word-mcp\s*$' })
+    if ($filtered.Count -eq $lines.Count) {
+        Write-Host "Hermes skill 'word-mcp' was not disabled in config."
+        return
+    }
+
+    $backupPath = "$configPath.bak.word-mcp-install"
+    Copy-Item -LiteralPath $configPath -Destination $backupPath -Force
+    Set-Content -LiteralPath $configPath -Value $filtered -Encoding UTF8
+    Write-Host "Enabled Hermes skill 'word-mcp' by removing it from skills.disabled."
+    Write-Host "Hermes config backup: $backupPath"
+}
+
+function Install-HermesSkill {
+    param([string]$RepoRoot)
+
+    if (-not $env:LOCALAPPDATA) {
+        Write-Warning "LOCALAPPDATA is not set; skipping Hermes skill installation."
+        return
+    }
+
+    $sourcePath = Get-WordMcpSkillSourcePath -RepoRoot $RepoRoot
+    $destinationPath = Join-Path $env:LOCALAPPDATA "hermes\skills\word-mcp\SKILL.md"
+    Install-AgentSkillFile -ClientName "Hermes" -SourcePath $sourcePath -DestinationPath $destinationPath
+    Enable-HermesSkill
+}
+
+function Install-OpenClawSkill {
+    param([string]$RepoRoot)
+
+    $sourcePath = Get-WordMcpSkillSourcePath -RepoRoot $RepoRoot
+    $destinationPath = Join-Path (Get-UserHomePath) ".openclaw\skills\word-mcp\SKILL.md"
+    Install-AgentSkillFile -ClientName "OpenClaw" -SourcePath $sourcePath -DestinationPath $destinationPath
 }
 
 function Get-McpUrl {
@@ -568,6 +649,23 @@ elseif ($installTarget -eq "openclaw") {
 }
 else {
     Write-Host "Custom target selected; no MCP client registration was attempted."
+}
+
+if ($SkipSkillInstall) {
+    Write-Host "Skipping agent skill installation because -SkipSkillInstall was supplied."
+}
+elseif ($installTarget -eq "hermes") {
+    Write-Step "Installing Word MCP skill for Hermes"
+    Install-HermesSkill -RepoRoot $repoRoot
+    Write-Host "Start a new Hermes session for the skill prompt to be loaded."
+}
+elseif ($installTarget -eq "openclaw") {
+    Write-Step "Installing Word MCP skill for OpenClaw"
+    Install-OpenClawSkill -RepoRoot $repoRoot
+    Write-Host "Start a new OpenClaw session for the skill prompt to be loaded."
+}
+else {
+    Write-Host "Custom target selected; agent skill source: $(Get-WordMcpSkillSourcePath -RepoRoot $repoRoot)"
 }
 
 Write-Step "$installTarget MCP config"

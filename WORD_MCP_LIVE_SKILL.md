@@ -1,45 +1,53 @@
 ---
 name: word-mcp
-description: "Create, edit, inspect, redline, comment on, save, close, or recreate Microsoft Word documents through the Hermes Word MCP server. Use Hermes MCP tool names such as mcp_word_word_v2_open, never bare word_v2_* names or Python document scripts."
-version: 1.2.0
-author: hermes-agent
+description: "Create, edit, inspect, redline, comment on, save, close, or recreate Microsoft Word documents through the Word MCP server. Use the configured MCP tools, not Python document scripts."
+version: 1.3.0
+author: word-mcp-live
 tags: [word, mcp, documents, office]
 ---
 
 # Word MCP Live Skill
 
-Use this skill for Microsoft Word document work when the Hermes `word` MCP
-server is configured.
+Use this skill for Microsoft Word document work when the `word` MCP server is
+configured in Hermes or OpenClaw.
 
 ## Critical Naming Rule
 
-In Hermes, MCP tool names are prefixed as `mcp_{server}_{tool}`. The Word MCP
-server is named `word`, and its native tools are named `word_v2_*`, so callable
-Hermes tools look like this:
+Use the exact Word MCP tool names exposed by the current agent runtime. Do not
+invent shell commands or Python scripts to work around tool naming.
 
-| Intent | Hermes tool to call |
-| --- | --- |
-| Open, list, attach, or create a document | `mcp_word_word_v2_open` |
-| Save or export | `mcp_word_word_v2_save` |
-| Close | `mcp_word_word_v2_close` |
-| Read text, info, comments, revisions, pages, formatting | `mcp_word_word_v2_get_content` |
-| Search text and get handles | `mcp_word_word_v2_search` |
-| Insert, replace, delete, insert paragraphs, links, footnotes | `mcp_word_word_v2_edit` |
-| Format text, paragraphs, styles, or lists | `mcp_word_word_v2_format` |
-| Create, list, reply, resolve, or delete comments | `mcp_word_word_v2_comment` |
-| Enable/list/accept/reject tracked changes | `mcp_word_word_v2_track_changes` |
-| Create, inspect, edit, or format tables | `mcp_word_word_v2_table` |
-| Insert images/media | `mcp_word_word_v2_media` |
-| Page setup, page breaks, section breaks, document properties | `mcp_word_word_v2_layout` |
-| Inspect, validate, export, or create blueprints | `mcp_word_word_v2_blueprint` |
-| Protect or unprotect documents | `mcp_word_word_v2_protection` |
-| Batch multiple operations | `mcp_word_word_v2_mutations` |
+Hermes prefixes MCP tools as `mcp_{server}_{tool}`. With the server named
+`word`, callable Hermes tools look like this:
+
+OpenClaw commonly exposes MCP tools with a server prefix such as
+`word__word_v2_open`. If OpenClaw shows a different provider-safe name in its
+tool list, use the visible OpenClaw name exactly.
+
+| Intent | Hermes tool | Typical OpenClaw tool |
+| --- | --- | --- |
+| Open, list, attach, or create a document | `mcp_word_word_v2_open` | `word__word_v2_open` |
+| Save or export | `mcp_word_word_v2_save` | `word__word_v2_save` |
+| Close | `mcp_word_word_v2_close` | `word__word_v2_close` |
+| Read text, info, comments, revisions, pages, formatting | `mcp_word_word_v2_get_content` | `word__word_v2_get_content` |
+| Search text and get handles | `mcp_word_word_v2_search` | `word__word_v2_search` |
+| Insert, replace, delete, insert paragraphs, links, footnotes | `mcp_word_word_v2_edit` | `word__word_v2_edit` |
+| Format text, paragraphs, styles, or lists | `mcp_word_word_v2_format` | `word__word_v2_format` |
+| Create, list, reply, resolve, or delete comments | `mcp_word_word_v2_comment` | `word__word_v2_comment` |
+| Enable/list/accept/reject tracked changes | `mcp_word_word_v2_track_changes` | `word__word_v2_track_changes` |
+| Create, inspect, edit, or format tables | `mcp_word_word_v2_table` | `word__word_v2_table` |
+| Insert images/media | `mcp_word_word_v2_media` | `word__word_v2_media` |
+| Page setup, page breaks, section breaks, document properties | `mcp_word_word_v2_layout` | `word__word_v2_layout` |
+| Inspect, validate, export, or create blueprints | `mcp_word_word_v2_blueprint` | `word__word_v2_blueprint` |
+| Protect or unprotect documents | `mcp_word_word_v2_protection` | `word__word_v2_protection` |
+| Batch multiple operations | `mcp_word_word_v2_mutations` | `word__word_v2_mutations` |
 
 Do not try to call bare names like `word_v2_open`. Do not use Codex-style
-names like `mcp__word.word_v2_open`. Those names are not Hermes tools.
+names like `mcp__word.word_v2_open`. Those names are not the normal Hermes or
+OpenClaw tool names.
 
-The JSON examples below are arguments for the named Hermes tool, not shell
-commands.
+The JSON examples below are arguments for the named Word MCP tool, not shell
+commands. When running in OpenClaw, call the OpenClaw tool name from the table
+with the same JSON arguments.
 
 ## Do Not Use Terminal For MCP Calls
 
@@ -51,35 +59,39 @@ hermes mcp call word word_v2_open '{"action":"list"}'
 
 Hermes has no `mcp call` command. `hermes mcp test word` only verifies that the
 server can start and list tool schemas; it does not execute Word MCP tools.
+OpenClaw MCP registry commands are also setup/diagnostic commands, not a
+replacement for native tool calls inside an agent session.
 
-To open/list Word documents, make a native Hermes tool call to
-`mcp_word_word_v2_open` with:
+To open/list Word documents, make a native agent tool call to the open/list tool
+for the current client, for example `mcp_word_word_v2_open` in Hermes or
+`word__word_v2_open` in OpenClaw, with:
 
 ```json
 {"action": "list"}
 ```
 
-If `mcp_word_word_v2_open` is not available in the current toolset, stop and
-report that the session must be restarted with the `word` toolset. Do not use
-the terminal tool to work around missing MCP tools.
+If the Word MCP tools are not available in the current toolset, stop and report
+that the session must be restarted or reloaded with the `word` MCP server
+enabled. Do not use the terminal tool to work around missing MCP tools.
 
 ## Toolset Requirement
 
 The `word` MCP server must be in the active toolset. If Hermes says a Word MCP
 tool is "not available in this toolset", the session was likely started with a
 restricted toolset such as only `hermes-cli`. The session needs the `word`
-toolset, for example `word` or `hermes-cli,word`.
+toolset, for example `word` or `hermes-cli,word`. In OpenClaw, start a new
+session after installing or changing MCP/skill configuration.
 
 Do not work around a missing Word MCP tool by writing Python. Report the
 toolset problem and ask for the session to be restarted with the `word` toolset.
 
 ## Hard Rules
 
-- Use `mcp_word_word_v2_*` tools for Word document operations.
+- Use the current client's `word_v2_*` MCP tools for Word document operations.
 - Do not write or run Python, `python-docx`, `pywin32`, PowerShell COM, OOXML
   zip edits, or filesystem mutation scripts to inspect, edit, comment, redline,
   save, close, or recreate `.docx` files.
-- Always open, attach, or list first with `mcp_word_word_v2_open`; carry the
+- Always open, attach, or list first with the Word open/list tool; carry the
   returned `session_id`.
 - Inspect before structural edits on existing documents.
 - Re-inspect after edits or blueprint creation before final save.
@@ -94,10 +106,11 @@ to debug or modify the Word MCP server implementation itself.
 ## Prerequisites
 
 The Word MCP server uses Microsoft Word automation underneath. `hermes mcp test
-word` verifies that the MCP server starts and exposes schemas; the real runtime
-check is a Word MCP operation such as `mcp_word_word_v2_open`.
+word` or `openclaw mcp doctor word --probe` verifies that the MCP server starts
+and exposes schemas; the real runtime check is a Word MCP operation such as
+opening or listing Word documents.
 
-If `mcp_word_word_v2_open` hangs or fails, report the Word/MCP runtime failure
+If the Word open/list tool hangs or fails, report the Word/MCP runtime failure
 and stop. Do not verify or edit the document with Python as a fallback.
 
 ## Open Or Attach

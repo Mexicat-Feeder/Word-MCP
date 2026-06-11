@@ -28,6 +28,7 @@ The installer will:
 - Install dependencies.
 - Run smoke tests.
 - Ask whether to configure `hermes`, `openclaw`, or `custom`.
+- Install the Word MCP agent skill for Hermes or OpenClaw.
 
 For a specific client, skip the selector:
 
@@ -46,6 +47,7 @@ script will print the config object you can paste into your client.
 .\scripts\install-word-mcp.ps1 -Author "Your Name" -AuthorInitials "YN"
 .\scripts\install-word-mcp.ps1 -SkipTests
 .\scripts\install-word-mcp.ps1 -SkipRegister
+.\scripts\install-word-mcp.ps1 -SkipSkillInstall
 ```
 
 `MCP_AUTHOR` and `MCP_AUTHOR_INITIALS` control the author shown on Word comments
