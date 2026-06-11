@@ -492,10 +492,73 @@ function Write-OpenClawManualCommand {
         [bool]$SkipProbe
     )
 
-    Write-Host "Manual OpenClaw commands:" -ForegroundColor Yellow
-    Write-Host "openclaw mcp set $ServerName '$ConfigJson'"
+    $openClawConfigPath = Join-Path (Get-UserHomePath) ".openclaw\openclaw.json"
+    Write-Host "Manual OpenClaw fallback:" -ForegroundColor Yellow
+    Write-Host "Add the following object under mcp.servers.$ServerName in $openClawConfigPath"
+    Write-Host $ConfigJson
     if (-not $SkipProbe) {
-        Write-Host "openclaw mcp doctor $ServerName --probe"
+        Write-Host "Then run: openclaw mcp doctor $ServerName --probe"
+    }
+}
+
+function Set-OpenClawMcpConfigFile {
+    param(
+        [string]$ServerName,
+        [object]$Config,
+        [string]$PythonPath
+    )
+
+    $openClawDir = Join-Path (Get-UserHomePath) ".openclaw"
+    $configPath = Join-Path $openClawDir "openclaw.json"
+    New-Item -ItemType Directory -Path $openClawDir -Force | Out-Null
+
+    $tempDir = [IO.Path]::GetTempPath()
+    $serverConfigPath = Join-Path $tempDir "word-mcp-openclaw-$PID.json"
+    $pythonScriptPath = Join-Path $tempDir "word-mcp-openclaw-$PID.py"
+    $Config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $serverConfigPath -Encoding UTF8
+
+    $pythonScript = @'
+import json
+import shutil
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+server_name = sys.argv[2]
+server_config_path = Path(sys.argv[3])
+
+backup_path = ""
+if config_path.exists():
+    backup_path = str(config_path) + ".bak.word-mcp-install"
+    shutil.copy2(config_path, backup_path)
+    raw = config_path.read_text(encoding="utf-8-sig").strip()
+    root = json.loads(raw) if raw else {}
+else:
+    root = {}
+
+server_config = json.loads(server_config_path.read_text(encoding="utf-8-sig"))
+root.setdefault("mcp", {}).setdefault("servers", {})[server_name] = server_config
+config_path.write_text(json.dumps(root, indent=2) + "\n", encoding="utf-8")
+
+print(f"Saved OpenClaw MCP server '{server_name}' to {config_path}.")
+if backup_path:
+    print(f"OpenClaw config backup: {backup_path}")
+'@
+    Set-Content -LiteralPath $pythonScriptPath -Value $pythonScript -Encoding UTF8
+
+    try {
+        $output = & $PythonPath $pythonScriptPath $configPath $ServerName $serverConfigPath 2>&1
+        $exitCode = $LASTEXITCODE
+        if ($output) {
+            $output | ForEach-Object { Write-Host $_ }
+        }
+        if ($exitCode -ne 0) {
+            throw "OpenClaw config file update failed with exit code $exitCode"
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $serverConfigPath -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $pythonScriptPath -ErrorAction SilentlyContinue
     }
 }
 
@@ -503,21 +566,20 @@ function Register-OpenClawMcp {
     param(
         [string]$ServerName,
         [object]$Config,
-        [bool]$SkipProbe
+        [bool]$SkipProbe,
+        [string]$PythonPath
     )
 
     $configJson = $Config | ConvertTo-Json -Depth 20 -Compress
-    $openclaw = Get-Command openclaw -ErrorAction SilentlyContinue
-    if (-not $openclaw) {
-        Write-Warning "OpenClaw CLI was not found on PATH. Install the native Windows CLI version; the Windows Hub version is not supported by this installer path. The config was still written."
-        Write-OpenClawManualCommand -ServerName $ServerName -ConfigJson $configJson -SkipProbe $SkipProbe
-        return
-    }
 
     Write-Step "Registering MCP server with OpenClaw"
     try {
-        Invoke-ClientCli -Executable $openclaw.Source -Arguments @("mcp", "set", $ServerName, $configJson)
-        if (-not $SkipProbe) {
+        Set-OpenClawMcpConfigFile -ServerName $ServerName -Config $Config -PythonPath $PythonPath
+        $openclaw = Get-Command openclaw -ErrorAction SilentlyContinue
+        if (-not $openclaw) {
+            Write-Warning "OpenClaw CLI was not found on PATH. Install the native Windows CLI version; the Windows Hub version is not supported by this installer path. The config file was still updated."
+        }
+        elseif (-not $SkipProbe) {
             Invoke-ClientCli -Executable $openclaw.Source -Arguments @("mcp", "doctor", $ServerName, "--probe")
         }
     }
@@ -653,7 +715,8 @@ elseif ($installTarget -eq "openclaw") {
     Register-OpenClawMcp `
         -ServerName $ServerName `
         -Config $config `
-        -SkipProbe ([bool]$SkipProbe)
+        -SkipProbe ([bool]$SkipProbe) `
+        -PythonPath $pythonPath
 }
 else {
     Write-Host "Custom target selected; no MCP client registration was attempted."
