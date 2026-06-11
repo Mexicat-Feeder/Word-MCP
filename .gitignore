@@ -20,6 +20,7 @@ wheels/
 mcp-config*.json
 hermes-word-mcp*.json
 word-mcp-*.json
+Reports from agents/
 
 # MCP Registry tokens (secrets)
 .mcpregistry_*

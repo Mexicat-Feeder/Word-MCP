@@ -1,6 +1,0 @@
-fastmcp
-python-docx
-msoffcrypto-tool
-docx2pdf
-python-dotenv
-Pillow>=10.0.0; sys_platform == "win32"
