@@ -63,17 +63,31 @@ The script:
 - Runs `uv sync`.
 - Creates a default `.env` if one does not already exist.
 - Runs smoke tests unless `-SkipTests` is passed.
-- Writes and prints `hermes-word-mcp.json` in Hermes server-entry format.
+- Asks whether to configure Hermes, OpenClaw, or a custom MCP client.
+- Writes and prints a target-specific `word-mcp-*.json` config file.
+- Registers the server with the selected client CLI when available.
 
 Useful options:
 
 ```powershell
+.\scripts\install-word-mcp.ps1 -Target hermes
+.\scripts\install-word-mcp.ps1 -Target openclaw
+.\scripts\install-word-mcp.ps1 -Target custom
 .\scripts\install-word-mcp.ps1 -Author "Your Name" -AuthorInitials "YN"
 .\scripts\install-word-mcp.ps1 -SkipTests
+.\scripts\install-word-mcp.ps1 -SkipRegister
 .\scripts\install-word-mcp.ps1 -Transport streamable-http -HostAddress 127.0.0.1 -Port 8000
 ```
 
-The final config output is Hermes-specific:
+Targets:
+
+| Target | Behavior |
+| --- | --- |
+| `hermes` | Generates Hermes config and runs `hermes mcp add word ...` when the CLI is on `PATH`. |
+| `openclaw` | Generates OpenClaw config and runs `openclaw mcp set word ...`, then `openclaw mcp doctor word --probe` unless `-SkipProbe` is passed. |
+| `custom` | Only writes and prints the config object. |
+
+Hermes stdio config output:
 
 ```json
 {
@@ -88,6 +102,24 @@ The final config output is Hermes-specific:
   },
   "timeout": 180,
   "connect_timeout": 30
+}
+```
+
+OpenClaw stdio config uses `cwd` instead of `PYTHONPATH`:
+
+```json
+{
+  "command": "C:\\path\\to\\Word-MCP\\.venv\\Scripts\\python.exe",
+  "args": [
+    "-m",
+    "word_document_server.main"
+  ],
+  "cwd": "C:\\path\\to\\Word-MCP",
+  "env": {
+    "MCP_TRANSPORT": "stdio"
+  },
+  "timeout": 180,
+  "connectTimeout": 30
 }
 ```
 

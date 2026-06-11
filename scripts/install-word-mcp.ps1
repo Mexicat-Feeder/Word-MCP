@@ -1,5 +1,10 @@
 [CmdletBinding()]
 param(
+    [ValidateSet("prompt", "hermes", "openclaw", "custom")]
+    [string]$Target = "prompt",
+
+    [string]$ServerName = "word",
+
     [ValidateSet("stdio", "streamable-http", "sse")]
     [string]$Transport = "stdio",
 
@@ -9,12 +14,14 @@ param(
     [int]$Port = 8000,
     [string]$McpPath = "/mcp",
     [string]$SsePath = "/sse",
-    [string]$ConfigOut = "hermes-word-mcp.json",
+    [string]$ConfigOut = "",
     [int]$Timeout = 180,
     [int]$ConnectTimeout = 30,
 
     [switch]$SkipUvInstall,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$SkipRegister,
+    [switch]$SkipProbe
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +37,36 @@ function Resolve-RepoRoot {
         return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
     }
     return (Get-Location).Path
+}
+
+function Resolve-InstallTarget {
+    param([string]$Target)
+
+    if ($Target -ne "prompt") {
+        return $Target
+    }
+
+    Write-Step "Select MCP client target"
+    Write-Host "1. hermes   - register with 'hermes mcp add' when available"
+    Write-Host "2. openclaw - register with 'openclaw mcp set' when available"
+    Write-Host "3. custom   - write and print the MCP config only"
+    $selection = Read-Host "Target (1-3, default: custom)"
+
+    $normalized = ""
+    if ($selection) {
+        $normalized = $selection.Trim().ToLowerInvariant()
+    }
+
+    switch ($normalized) {
+        "" { return "custom" }
+        "1" { return "hermes" }
+        "hermes" { return "hermes" }
+        "2" { return "openclaw" }
+        "openclaw" { return "openclaw" }
+        "3" { return "custom" }
+        "custom" { return "custom" }
+        default { throw "Unknown target '$selection'. Use hermes, openclaw, or custom." }
+    }
 }
 
 function Get-RequiredPythonVersion {
@@ -165,6 +202,19 @@ function Get-ProjectPythonPath {
     return (Join-Path $RepoRoot ".venv/bin/python")
 }
 
+function Get-McpUrl {
+    param(
+        [string]$Transport,
+        [string]$HostAddress,
+        [int]$Port,
+        [string]$McpPath,
+        [string]$SsePath
+    )
+
+    $path = if ($Transport -eq "sse") { $SsePath } else { $McpPath }
+    return "http://${HostAddress}:$Port$path"
+}
+
 function New-HermesMcpConfig {
     param(
         [string]$RepoRoot,
@@ -178,20 +228,17 @@ function New-HermesMcpConfig {
         [int]$ConnectTimeout
     )
 
+    if ($Transport -ne "stdio") {
+        return [ordered]@{
+            url = Get-McpUrl -Transport $Transport -HostAddress $HostAddress -Port $Port -McpPath $McpPath -SsePath $SsePath
+            timeout = $Timeout
+            connect_timeout = $ConnectTimeout
+        }
+    }
+
     $envConfig = [ordered]@{
         MCP_TRANSPORT = $Transport
         PYTHONPATH = $RepoRoot
-    }
-
-    if ($Transport -eq "streamable-http") {
-        $envConfig["MCP_HOST"] = $HostAddress
-        $envConfig["MCP_PORT"] = "$Port"
-        $envConfig["MCP_PATH"] = $McpPath
-    }
-    elseif ($Transport -eq "sse") {
-        $envConfig["MCP_HOST"] = $HostAddress
-        $envConfig["MCP_PORT"] = "$Port"
-        $envConfig["MCP_SSE_PATH"] = $SsePath
     }
 
     return [ordered]@{
@@ -206,7 +253,180 @@ function New-HermesMcpConfig {
     }
 }
 
+function New-OpenClawMcpConfig {
+    param(
+        [string]$RepoRoot,
+        [string]$PythonPath,
+        [string]$Transport,
+        [string]$HostAddress,
+        [int]$Port,
+        [string]$McpPath,
+        [string]$SsePath,
+        [int]$Timeout,
+        [int]$ConnectTimeout
+    )
+
+    if ($Transport -ne "stdio") {
+        return [ordered]@{
+            url = Get-McpUrl -Transport $Transport -HostAddress $HostAddress -Port $Port -McpPath $McpPath -SsePath $SsePath
+            transport = $Transport
+            timeout = $Timeout
+            connectTimeout = $ConnectTimeout
+        }
+    }
+
+    return [ordered]@{
+        command = $PythonPath
+        args = @(
+            "-m",
+            "word_document_server.main"
+        )
+        cwd = $RepoRoot
+        env = [ordered]@{
+            MCP_TRANSPORT = "stdio"
+        }
+        timeout = $Timeout
+        connectTimeout = $ConnectTimeout
+    }
+}
+
+function Invoke-ClientCli {
+    param(
+        [string]$Executable,
+        [string[]]$Arguments
+    )
+
+    Write-Host "> $Executable $($Arguments -join ' ')" -ForegroundColor DarkGray
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & $Executable @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($output) {
+        $output | ForEach-Object { Write-Host $_ }
+    }
+    if ($exitCode -ne 0) {
+        throw "$Executable $($Arguments -join ' ') failed with exit code $exitCode"
+    }
+}
+
+function Write-HermesManualCommand {
+    param(
+        [string]$ServerName,
+        [string]$RepoRoot,
+        [string]$PythonPath,
+        [string]$Transport,
+        [string]$Url
+    )
+
+    Write-Host "Manual Hermes command:" -ForegroundColor Yellow
+    if ($Transport -eq "stdio") {
+        Write-Host "hermes mcp add $ServerName --command `"$PythonPath`" --args=-m word_document_server.main --env MCP_TRANSPORT=stdio PYTHONPATH=`"$RepoRoot`""
+    }
+    else {
+        Write-Host "hermes mcp add $ServerName --url `"$Url`""
+    }
+}
+
+function Register-HermesMcp {
+    param(
+        [string]$ServerName,
+        [string]$RepoRoot,
+        [string]$PythonPath,
+        [string]$Transport,
+        [string]$Url
+    )
+
+    $hermes = Get-Command hermes -ErrorAction SilentlyContinue
+    if (-not $hermes) {
+        Write-Warning "Hermes CLI was not found on PATH. The config was still written."
+        Write-HermesManualCommand -ServerName $ServerName -RepoRoot $RepoRoot -PythonPath $PythonPath -Transport $Transport -Url $Url
+        return
+    }
+
+    Write-Step "Registering MCP server with Hermes"
+    if ($Transport -eq "stdio") {
+        $arguments = @(
+            "mcp",
+            "add",
+            $ServerName,
+            "--command",
+            $PythonPath,
+            "--args=-m",
+            "word_document_server.main",
+            "--env",
+            "MCP_TRANSPORT=stdio",
+            "PYTHONPATH=$RepoRoot"
+        )
+    }
+    else {
+        $arguments = @(
+            "mcp",
+            "add",
+            $ServerName,
+            "--url",
+            $Url
+        )
+    }
+
+    try {
+        Invoke-ClientCli -Executable $hermes.Source -Arguments $arguments
+    }
+    catch {
+        Write-Warning "Hermes registration failed: $_"
+        Write-HermesManualCommand -ServerName $ServerName -RepoRoot $RepoRoot -PythonPath $PythonPath -Transport $Transport -Url $Url
+    }
+}
+
+function Write-OpenClawManualCommand {
+    param(
+        [string]$ServerName,
+        [string]$ConfigJson,
+        [bool]$SkipProbe
+    )
+
+    Write-Host "Manual OpenClaw commands:" -ForegroundColor Yellow
+    Write-Host "openclaw mcp set $ServerName '$ConfigJson'"
+    if (-not $SkipProbe) {
+        Write-Host "openclaw mcp doctor $ServerName --probe"
+    }
+}
+
+function Register-OpenClawMcp {
+    param(
+        [string]$ServerName,
+        [object]$Config,
+        [bool]$SkipProbe
+    )
+
+    $configJson = $Config | ConvertTo-Json -Depth 20 -Compress
+    $openclaw = Get-Command openclaw -ErrorAction SilentlyContinue
+    if (-not $openclaw) {
+        Write-Warning "OpenClaw CLI was not found on PATH. The config was still written."
+        Write-OpenClawManualCommand -ServerName $ServerName -ConfigJson $configJson -SkipProbe $SkipProbe
+        return
+    }
+
+    Write-Step "Registering MCP server with OpenClaw"
+    try {
+        Invoke-ClientCli -Executable $openclaw.Source -Arguments @("mcp", "set", $ServerName, $configJson)
+        if (-not $SkipProbe) {
+            Invoke-ClientCli -Executable $openclaw.Source -Arguments @("mcp", "doctor", $ServerName, "--probe")
+        }
+    }
+    catch {
+        Write-Warning "OpenClaw registration failed: $_"
+        Write-OpenClawManualCommand -ServerName $ServerName -ConfigJson $configJson -SkipProbe $SkipProbe
+    }
+}
+
 $repoRoot = Resolve-RepoRoot
+$installTarget = Resolve-InstallTarget -Target $Target
 $requiredPython = Get-RequiredPythonVersion -RepoRoot $repoRoot
 
 if (-not $Author) {
@@ -219,6 +439,8 @@ if (-not $AuthorInitials) {
 Write-Step "Preparing Word MCP Live"
 Write-Host "Repository: $repoRoot"
 Write-Host "Requested Python: $requiredPython"
+Write-Host "MCP client target: $installTarget"
+Write-Host "MCP server name: $ServerName"
 Write-Host "Transport: $Transport"
 
 $uvPath = Find-Uv
@@ -268,18 +490,37 @@ if (-not $SkipTests) {
     Invoke-Uv -UvPath $uvPath -Arguments @("run", "python", "-m", "pytest", "-q") -WorkingDirectory $repoRoot
 }
 
-$config = New-HermesMcpConfig `
-    -RepoRoot $repoRoot `
-    -PythonPath $pythonPath `
-    -Transport $Transport `
-    -HostAddress $HostAddress `
-    -Port $Port `
-    -McpPath $McpPath `
-    -SsePath $SsePath `
-    -Timeout $Timeout `
-    -ConnectTimeout $ConnectTimeout
+if ($installTarget -eq "openclaw") {
+    $config = New-OpenClawMcpConfig `
+        -RepoRoot $repoRoot `
+        -PythonPath $pythonPath `
+        -Transport $Transport `
+        -HostAddress $HostAddress `
+        -Port $Port `
+        -McpPath $McpPath `
+        -SsePath $SsePath `
+        -Timeout $Timeout `
+        -ConnectTimeout $ConnectTimeout
+}
+else {
+    $config = New-HermesMcpConfig `
+        -RepoRoot $repoRoot `
+        -PythonPath $pythonPath `
+        -Transport $Transport `
+        -HostAddress $HostAddress `
+        -Port $Port `
+        -McpPath $McpPath `
+        -SsePath $SsePath `
+        -Timeout $Timeout `
+        -ConnectTimeout $ConnectTimeout
+}
 
 $configJson = $config | ConvertTo-Json -Depth 20
+
+if (-not $ConfigOut) {
+    $ConfigOut = "word-mcp-$installTarget.json"
+}
+
 $configPath = if ([IO.Path]::IsPathRooted($ConfigOut)) {
     $ConfigOut
 }
@@ -288,8 +529,37 @@ else {
 }
 Set-Content -LiteralPath $configPath -Value $configJson -Encoding UTF8
 
-Write-Step "Hermes-specific MCP config"
+if ($SkipRegister) {
+    Write-Host "Skipping MCP client registration because -SkipRegister was supplied."
+}
+elseif ($installTarget -eq "hermes") {
+    Register-HermesMcp `
+        -ServerName $ServerName `
+        -RepoRoot $repoRoot `
+        -PythonPath $pythonPath `
+        -Transport $Transport `
+        -Url (Get-McpUrl -Transport $Transport -HostAddress $HostAddress -Port $Port -McpPath $McpPath -SsePath $SsePath)
+}
+elseif ($installTarget -eq "openclaw") {
+    Register-OpenClawMcp `
+        -ServerName $ServerName `
+        -Config $config `
+        -SkipProbe ([bool]$SkipProbe)
+}
+else {
+    Write-Host "Custom target selected; no MCP client registration was attempted."
+}
+
+Write-Step "$installTarget MCP config"
 Write-Host "Wrote: $configPath"
-Write-Host "This output is Hermes-specific. Add it as the server entry for your Hermes 'word' MCP server." -ForegroundColor Green
+if ($installTarget -eq "hermes") {
+    Write-Host "This output is Hermes-specific. Add it as the server entry for your Hermes '$ServerName' MCP server if you do not use the CLI registration above." -ForegroundColor Green
+}
+elseif ($installTarget -eq "openclaw") {
+    Write-Host "This output is OpenClaw-specific. For stdio, it uses cwd instead of PYTHONPATH for startup safety." -ForegroundColor Green
+}
+else {
+    Write-Host "This output is a generic MCP client config object." -ForegroundColor Green
+}
 Write-Host ""
 Write-Output $configJson
