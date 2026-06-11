@@ -373,12 +373,15 @@ function New-OpenClawMcpConfig {
         }
     }
 
+    $commandPath = if ($IsWindows -or $env:OS -eq "Windows_NT") {
+        ".venv\Scripts\word_mcp_server.exe"
+    }
+    else {
+        ".venv/bin/word_mcp_server"
+    }
+
     return [ordered]@{
-        command = $PythonPath
-        args = @(
-            "-m",
-            "word_document_server.main"
-        )
+        command = $commandPath
         cwd = $RepoRoot
         env = [ordered]@{
             MCP_TRANSPORT = "stdio"
@@ -488,104 +491,121 @@ function Register-HermesMcp {
 function Write-OpenClawManualCommand {
     param(
         [string]$ServerName,
-        [string]$ConfigJson,
+        [string]$RepoRoot,
+        [string]$CommandPath,
+        [string]$Transport,
+        [string]$Url,
+        [int]$Timeout,
+        [int]$ConnectTimeout,
         [bool]$SkipProbe
     )
 
-    $openClawConfigPath = Join-Path (Get-UserHomePath) ".openclaw\openclaw.json"
-    Write-Host "Manual OpenClaw fallback:" -ForegroundColor Yellow
-    Write-Host "Add the following object under mcp.servers.$ServerName in $openClawConfigPath"
-    Write-Host $ConfigJson
+    Write-Host "Manual OpenClaw commands:" -ForegroundColor Yellow
+    Write-Host "openclaw mcp unset $ServerName"
+    if ($Transport -eq "stdio") {
+        Write-Host "openclaw mcp add $ServerName --command `"$CommandPath`" --cwd `"$RepoRoot`" --env MCP_TRANSPORT=stdio --timeout $Timeout --connect-timeout $ConnectTimeout --no-probe"
+    }
+    else {
+        Write-Host "openclaw mcp add $ServerName --url `"$Url`" --transport $Transport --timeout $Timeout --connect-timeout $ConnectTimeout --no-probe"
+    }
     if (-not $SkipProbe) {
-        Write-Host "Then run: openclaw mcp doctor $ServerName --probe"
-    }
-}
-
-function Set-OpenClawMcpConfigFile {
-    param(
-        [string]$ServerName,
-        [object]$Config,
-        [string]$PythonPath
-    )
-
-    $openClawDir = Join-Path (Get-UserHomePath) ".openclaw"
-    $configPath = Join-Path $openClawDir "openclaw.json"
-    New-Item -ItemType Directory -Path $openClawDir -Force | Out-Null
-
-    $tempDir = [IO.Path]::GetTempPath()
-    $serverConfigPath = Join-Path $tempDir "word-mcp-openclaw-$PID.json"
-    $pythonScriptPath = Join-Path $tempDir "word-mcp-openclaw-$PID.py"
-    $Config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $serverConfigPath -Encoding UTF8
-
-    $pythonScript = @'
-import json
-import shutil
-import sys
-from pathlib import Path
-
-config_path = Path(sys.argv[1])
-server_name = sys.argv[2]
-server_config_path = Path(sys.argv[3])
-
-backup_path = ""
-if config_path.exists():
-    backup_path = str(config_path) + ".bak.word-mcp-install"
-    shutil.copy2(config_path, backup_path)
-    raw = config_path.read_text(encoding="utf-8-sig").strip()
-    root = json.loads(raw) if raw else {}
-else:
-    root = {}
-
-server_config = json.loads(server_config_path.read_text(encoding="utf-8-sig"))
-root.setdefault("mcp", {}).setdefault("servers", {})[server_name] = server_config
-config_path.write_text(json.dumps(root, indent=2) + "\n", encoding="utf-8")
-
-print(f"Saved OpenClaw MCP server '{server_name}' to {config_path}.")
-if backup_path:
-    print(f"OpenClaw config backup: {backup_path}")
-'@
-    Set-Content -LiteralPath $pythonScriptPath -Value $pythonScript -Encoding UTF8
-
-    try {
-        $output = & $PythonPath $pythonScriptPath $configPath $ServerName $serverConfigPath 2>&1
-        $exitCode = $LASTEXITCODE
-        if ($output) {
-            $output | ForEach-Object { Write-Host $_ }
-        }
-        if ($exitCode -ne 0) {
-            throw "OpenClaw config file update failed with exit code $exitCode"
-        }
-    }
-    finally {
-        Remove-Item -LiteralPath $serverConfigPath -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $pythonScriptPath -ErrorAction SilentlyContinue
+        Write-Host "openclaw mcp doctor $ServerName --probe"
     }
 }
 
 function Register-OpenClawMcp {
     param(
         [string]$ServerName,
-        [object]$Config,
-        [bool]$SkipProbe,
-        [string]$PythonPath
+        [string]$RepoRoot,
+        [string]$CommandPath,
+        [string]$Transport,
+        [string]$Url,
+        [int]$Timeout,
+        [int]$ConnectTimeout,
+        [bool]$SkipProbe
     )
 
-    $configJson = $Config | ConvertTo-Json -Depth 20 -Compress
+    $openclaw = Get-Command openclaw -ErrorAction SilentlyContinue
+    if (-not $openclaw) {
+        Write-Warning "OpenClaw CLI was not found on PATH. Install the native Windows CLI version; the Windows Hub version is not supported by this installer path. The config was still written."
+        Write-OpenClawManualCommand `
+            -ServerName $ServerName `
+            -RepoRoot $RepoRoot `
+            -CommandPath $CommandPath `
+            -Transport $Transport `
+            -Url $Url `
+            -Timeout $Timeout `
+            -ConnectTimeout $ConnectTimeout `
+            -SkipProbe $SkipProbe
+        return
+    }
 
     Write-Step "Registering MCP server with OpenClaw"
     try {
-        Set-OpenClawMcpConfigFile -ServerName $ServerName -Config $Config -PythonPath $PythonPath
-        $openclaw = Get-Command openclaw -ErrorAction SilentlyContinue
-        if (-not $openclaw) {
-            Write-Warning "OpenClaw CLI was not found on PATH. Install the native Windows CLI version; the Windows Hub version is not supported by this installer path. The config file was still updated."
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $unsetOutput = & $openclaw.Source mcp unset $ServerName 2>&1
+            $unsetExitCode = $LASTEXITCODE
         }
-        elseif (-not $SkipProbe) {
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        if ($unsetExitCode -eq 0) {
+            Write-Host "Removed existing OpenClaw MCP server '$ServerName' before re-adding it."
+        }
+
+        if ($Transport -eq "stdio") {
+            $arguments = @(
+                "mcp",
+                "add",
+                $ServerName,
+                "--command",
+                $CommandPath,
+                "--cwd",
+                $RepoRoot,
+                "--env",
+                "MCP_TRANSPORT=stdio",
+                "--timeout",
+                "$Timeout",
+                "--connect-timeout",
+                "$ConnectTimeout",
+                "--no-probe"
+            )
+        }
+        else {
+            $arguments = @(
+                "mcp",
+                "add",
+                $ServerName,
+                "--url",
+                $Url,
+                "--transport",
+                $Transport,
+                "--timeout",
+                "$Timeout",
+                "--connect-timeout",
+                "$ConnectTimeout",
+                "--no-probe"
+            )
+        }
+
+        Invoke-ClientCli -Executable $openclaw.Source -Arguments $arguments
+        if (-not $SkipProbe) {
             Invoke-ClientCli -Executable $openclaw.Source -Arguments @("mcp", "doctor", $ServerName, "--probe")
         }
     }
     catch {
         Write-Warning "OpenClaw registration failed: $_"
-        Write-OpenClawManualCommand -ServerName $ServerName -ConfigJson $configJson -SkipProbe $SkipProbe
+        Write-OpenClawManualCommand `
+            -ServerName $ServerName `
+            -RepoRoot $RepoRoot `
+            -CommandPath $CommandPath `
+            -Transport $Transport `
+            -Url $Url `
+            -Timeout $Timeout `
+            -ConnectTimeout $ConnectTimeout `
+            -SkipProbe $SkipProbe
     }
 }
 
@@ -714,9 +734,13 @@ elseif ($installTarget -eq "hermes") {
 elseif ($installTarget -eq "openclaw") {
     Register-OpenClawMcp `
         -ServerName $ServerName `
-        -Config $config `
-        -SkipProbe ([bool]$SkipProbe) `
-        -PythonPath $pythonPath
+        -RepoRoot $repoRoot `
+        -CommandPath (".venv\Scripts\word_mcp_server.exe") `
+        -Transport $Transport `
+        -Url (Get-McpUrl -Transport $Transport -HostAddress $HostAddress -Port $Port -McpPath $McpPath -SsePath $SsePath) `
+        -Timeout $Timeout `
+        -ConnectTimeout $ConnectTimeout `
+        -SkipProbe ([bool]$SkipProbe)
 }
 else {
     Write-Host "Custom target selected; no MCP client registration was attempted."
