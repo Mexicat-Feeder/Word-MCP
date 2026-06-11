@@ -1324,7 +1324,7 @@ async def word_live_add_table(
                         "error": (
                             f"position offset {offset} sits immediately after "
                             f"an orphan cell separator (\\x07). Run "
-                            f"word_v2_table action='delete_table' on the "
+                            f"word_table action='delete_table' on the "
                             f"prior table before inserting new content."
                         )
                     })

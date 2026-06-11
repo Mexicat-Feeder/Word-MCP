@@ -2,4 +2,4 @@
 
 from word_document_server.tools import live_tools
 from word_document_server.tools import live_read_tools
-from word_document_server.tools import live_v2_tools
+from word_document_server.tools import live_api_tools

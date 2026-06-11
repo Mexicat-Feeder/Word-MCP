@@ -677,7 +677,7 @@ Ensure-DefaultEnvFile `
 
 if (-not $SkipTests) {
     Write-Step "Running install smoke tests"
-    Invoke-Uv -UvPath $uvPath -Arguments @("run", "python", "-m", "py_compile", "word_document_server/main.py", "word_document_server/tools/live_v2_tools.py") -WorkingDirectory $repoRoot
+    Invoke-Uv -UvPath $uvPath -Arguments @("run", "python", "-m", "py_compile", "word_document_server/main.py", "word_document_server/tools/live_api_tools.py") -WorkingDirectory $repoRoot
     Invoke-Uv -UvPath $uvPath -Arguments @("run", "python", "-m", "pytest", "-q") -WorkingDirectory $repoRoot
 }
 

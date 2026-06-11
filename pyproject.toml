@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "word-mcp-live"
-version = "1.6.2"
-description = "MCP server for live Microsoft Word editing with a grouped word_v2 tool surface"
+version = "1.7.0"
+description = "MCP server for live Microsoft Word editing with a grouped word tool surface"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [

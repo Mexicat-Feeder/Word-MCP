@@ -5,7 +5,7 @@ that are open on your machine.
 
 It lets an AI agent open or attach to Word documents, read content, make edits,
 turn tracked changes on or off, add comments, work with tables/images, save, and
-close documents through a small `word_v2_*` tool surface.
+close documents through a small `word_*` tool surface.
 
 This project is focused on live Word automation through Microsoft Word COM, so
 it requires Windows and Microsoft Word.
@@ -72,5 +72,5 @@ The default transport is `stdio`, which is what most local MCP clients expect.
 uv run python -m pytest -q
 ```
 
-See `LIVE_V2_AGENT_GUIDE.md` for the detailed tool workflow and
+See `LIVE_AGENT_GUIDE.md` for the detailed tool workflow and
 `WORD_MCP_LIVE_SKILL.md` for a compact agent-facing skill.

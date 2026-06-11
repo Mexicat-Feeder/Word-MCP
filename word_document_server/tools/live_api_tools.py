@@ -1,8 +1,9 @@
-"""V2 live Word tools: grouped, agent-friendly facade over COM helpers.
+"""Live Word tools: grouped, agent-friendly facade over COM helpers.
 
-The v2 surface is inspired by SuperDoc's MCP shape: a few lifecycle tools plus
-grouped intent tools. It keeps the existing live COM implementations underneath
-so v2 can improve tool ergonomics without rewriting Word automation logic.
+The public surface is inspired by SuperDoc's MCP shape: a few lifecycle tools
+plus grouped intent tools. It keeps the existing live COM implementations
+underneath so tool ergonomics can improve without rewriting Word automation
+logic.
 """
 
 from __future__ import annotations
@@ -1267,13 +1268,13 @@ def _long_find_usage(length: int, field: str = "find_text") -> dict[str, Any]:
         "error": f"{field} is {length} chars (Word Find limit: 255).",
         "usage": (
             "Do not split blindly if this is a long paragraph edit. Use a shorter unique "
-            "search string with word_v2_search(context_chars=...), then edit with the returned "
-            "handle; or replace a full paragraph by passing paragraph_index to word_v2_edit."
+            "search string with word_search(context_chars=...), then edit with the returned "
+            "handle; or replace a full paragraph by passing paragraph_index to word_edit."
         ),
         "alternatives": [
-            "word_v2_search(session_id, find_text='<short unique anchor>', context_chars=120)",
-            "word_v2_edit(session_id, action='replace', paragraph_index=3, text='<new paragraph>', track_changes=True)",
-            "word_v2_get_content(session_id, action='page_text', page=1, end_page=1) to get char offsets, then use start/end",
+            "word_search(session_id, find_text='<short unique anchor>', context_chars=120)",
+            "word_edit(session_id, action='replace', paragraph_index=3, text='<new paragraph>', track_changes=True)",
+            "word_get_content(session_id, action='page_text', page=1, end_page=1) to get char offsets, then use start/end",
         ],
     }
 
@@ -1283,8 +1284,8 @@ def _with_session(result: dict[str, Any]) -> dict[str, Any]:
     result["session_id"] = session_id
     result["mode"] = "live_com"
     result["next"] = [
-        "word_v2_get_content(session_id, action='info')",
-        "word_v2_search(session_id, find_text='...')",
+        "word_get_content(session_id, action='info')",
+        "word_search(session_id, find_text='...')",
     ]
     return result
 
@@ -1325,7 +1326,7 @@ async def _attach_open_document(path: str = None) -> dict[str, Any]:
             return {
                 "error": f"Open document not found: {path}",
                 "documents": documents,
-                "usage": "Call word_v2_open(action='list') to inspect open documents, then attach by name, full_path, or index.",
+                "usage": "Call word_open(action='list') to inspect open documents, then attach by name, full_path, or index.",
             }
     else:
         selected = next((doc for doc in documents if doc.get("active")), None) or documents[0]
@@ -1432,8 +1433,8 @@ def _normalize_mutation_tool_name(tool: str) -> str:
     normalized = (tool or "").lower().strip()
     if normalized.startswith("mcp_word_"):
         normalized = normalized[len("mcp_word_"):]
-    if normalized.startswith("word_v2_"):
-        normalized = normalized[len("word_v2_"):]
+    if normalized.startswith("word_"):
+        normalized = normalized[len("word_"):]
     return {
         "comments": "comment",
         "revision": "track_changes",
@@ -1449,7 +1450,7 @@ def _normalize_mutation_tool_name(tool: str) -> str:
     }.get(normalized, normalized)
 
 
-async def word_v2_open(
+async def word_open(
     path: str = None,
     directory: str = ".",
     visible: bool = True,
@@ -1467,11 +1468,11 @@ async def word_v2_open(
             result["session_count"] = len(_sessions)
             result["sessions"] = _session_records()
             result["usage"] = (
-                "Call word_v2_open() or word_v2_open(action='new') to create a new visible document, "
-                "word_v2_open(action='attach') to attach to the active document, "
-                "word_v2_open(action='attach', path='<name|full_path|index>') to attach a listed document, "
-                "word_v2_open(action='sessions') to list MCP session IDs, "
-                "or word_v2_open(path='<file.docx>') to open a file."
+                "Call word_open() or word_open(action='new') to create a new visible document, "
+                "word_open(action='attach') to attach to the active document, "
+                "word_open(action='attach', path='<name|full_path|index>') to attach a listed document, "
+                "word_open(action='sessions') to list MCP session IDs, "
+                "or word_open(path='<file.docx>') to open a file."
             )
         return _dump(result)
     if action in {"sessions", "list_sessions"}:
@@ -1480,7 +1481,7 @@ async def word_v2_open(
             "success": True,
             "count": len(sessions),
             "sessions": sessions,
-            "usage": "Use an existing session_id with word_v2_get_content, word_v2_search, word_v2_edit, word_v2_comment, word_v2_save, and word_v2_close.",
+            "usage": "Use an existing session_id with word_get_content, word_search, word_edit, word_comment, word_save, and word_close.",
         })
 
     if action in {"active", "attach"} or (action == "open" and path_alias in {"active", "current"}):
@@ -1494,7 +1495,7 @@ async def word_v2_open(
             if action == "open" and not path_alias:
                 result["message"] = (
                     f"{result.get('message', 'Created new document')} "
-                    "No path was provided, so word_v2_open created a new visible Word document. "
+                    "No path was provided, so word_open created a new visible Word document. "
                     "Use action='attach' to attach to an already-open document."
                 )
     elif action == "open":
@@ -1517,8 +1518,8 @@ async def word_v2_open(
     return _dump(_with_session(result))
 
 
-async def word_v2_save(session_id: str, out: str = None) -> str:
-    """Save a v2 live session in place, to a new path, or export as PDF."""
+async def word_save(session_id: str, out: str = None) -> str:
+    """Save a live session in place, to a new path, or export as PDF."""
     try:
         session = _sessions.get(session_id)
         if not session:
@@ -1547,8 +1548,8 @@ async def word_v2_save(session_id: str, out: str = None) -> str:
     return _dump(result)
 
 
-async def word_v2_close(session_id: str, save_changes: str = "save") -> str:
-    """Close a v2 live session. Unsaved changes follow save_changes."""
+async def word_close(session_id: str, save_changes: str = "save") -> str:
+    """Close a live session. Unsaved changes follow save_changes."""
     try:
         filename = _resolve_filename(session_id=session_id)
     except ValueError as exc:
@@ -1565,7 +1566,7 @@ async def word_v2_close(session_id: str, save_changes: str = "save") -> str:
     return _dump(result)
 
 
-async def word_v2_get_content(
+async def word_get_content(
     session_id: str,
     action: str = "text",
     page: int = 1,
@@ -1611,7 +1612,7 @@ async def word_v2_get_content(
     return _dump(result)
 
 
-async def word_v2_search(
+async def word_search(
     session_id: str,
     find_text: str,
     match_case: bool = False,
@@ -1620,7 +1621,7 @@ async def word_v2_search(
     context_chars: int = 80,
     max_results: int = 20,
 ) -> str:
-    """Find text and return reusable handles for later v2 edit/format/comment calls."""
+    """Find text and return reusable handles for later edit/format/comment calls."""
     try:
         filename = _resolve_filename(session_id=session_id)
     except ValueError as exc:
@@ -1644,11 +1645,11 @@ async def word_v2_search(
     matches = result.get("matches", [])
     result["matches"] = [_store_handle(session_id, match, i) for i, match in enumerate(matches)]
     result["session_id"] = session_id
-    result["usage"] = "Pass a match handle to word_v2_edit, word_v2_format, or word_v2_comment."
+    result["usage"] = "Pass a match handle to word_edit, word_format, or word_comment."
     return _dump(result)
 
 
-async def word_v2_edit(
+async def word_edit(
     session_id: str,
     action: str,
     text: str = "",
@@ -1769,7 +1770,7 @@ async def word_v2_edit(
     return _dump(result)
 
 
-async def word_v2_format(
+async def word_format(
     session_id: str,
     action: str = "inline",
     handle: str = None,
@@ -1825,7 +1826,7 @@ async def word_v2_format(
     return _dump(result)
 
 
-async def word_v2_comment(
+async def word_comment(
     session_id: str,
     action: str,
     comment_id: int = None,
@@ -1854,9 +1855,9 @@ async def word_v2_comment(
                 return _dump({
                     "error": "Comment target required",
                     "usage": (
-                        "Provide one of: handle from word_v2_search, target, start/end offsets, "
-                        "or paragraph_index from word_v2_get_content. Example: "
-                        "word_v2_comment(session_id, action='create', paragraph_index=3, text='...')."
+                        "Provide one of: handle from word_search, target, start/end offsets, "
+                        "or paragraph_index from word_get_content. Example: "
+                        "word_comment(session_id, action='create', paragraph_index=3, text='...')."
                     ),
                     "valid_targets": ["handle", "target", "start/end", "paragraph_index"],
                 })
@@ -1887,7 +1888,7 @@ async def word_v2_comment(
     return _dump(result)
 
 
-async def word_v2_track_changes(
+async def word_track_changes(
     session_id: str,
     action: str,
     enable: bool = None,
@@ -1917,7 +1918,7 @@ async def word_v2_track_changes(
     return _dump(result)
 
 
-async def word_v2_table(
+async def word_table(
     session_id: str,
     action: str,
     table_index: int = 1,
@@ -1966,7 +1967,7 @@ async def word_v2_table(
         if action == "delete_column" and col is None:
             return _dump({
                 "error": "delete_column requires col",
-                "usage": "Pass the 1-based column number, e.g. word_v2_table(session_id, action='delete_column', table_index=1, col=2).",
+                "usage": "Pass the 1-based column number, e.g. word_table(session_id, action='delete_column', table_index=1, col=2).",
             })
         result = _load_result(await live_tools.word_live_modify_table(
             filename, table_index, action, row, col, text, row, col, None, cells,
@@ -1986,7 +1987,7 @@ async def word_v2_table(
     return _dump(result)
 
 
-async def word_v2_media(
+async def word_media(
     session_id: str,
     action: str,
     path: str,
@@ -2045,12 +2046,12 @@ async def word_v2_media(
     return _dump(result)
 
 
-async def word_v2_mutations(
+async def word_mutations(
     session_id: str,
     action: str,
     operations: list[dict] = None,
 ) -> str:
-    """Preview or apply multiple v2 operations.
+    """Preview or apply multiple operations.
 
     Each operation is {"tool": "edit|format|comment|track_changes|table|media|layout", ...args}.
     Preview validates shape only; apply runs operations in order.
@@ -2074,24 +2075,24 @@ async def word_v2_mutations(
         args = {k: v for k, v in operation.items() if k != "tool"}
         args["session_id"] = session_id
         if tool == "edit":
-            raw = await word_v2_edit(**args)
+            raw = await word_edit(**args)
         elif tool == "format":
-            raw = await word_v2_format(**args)
+            raw = await word_format(**args)
         elif tool == "comment":
-            raw = await word_v2_comment(**args)
+            raw = await word_comment(**args)
         elif tool == "track_changes":
-            raw = await word_v2_track_changes(**args)
+            raw = await word_track_changes(**args)
         elif tool == "table":
-            raw = await word_v2_table(**args)
+            raw = await word_table(**args)
         elif tool == "media":
-            raw = await word_v2_media(**args)
+            raw = await word_media(**args)
         elif tool == "layout":
-            raw = await word_v2_layout(**args)
+            raw = await word_layout(**args)
         else:
             raw = _dump({
                 "error": f"Invalid operation tool at index {i}: {requested_tool}",
                 "valid_tools": ["edit", "format", "comment", "track_changes", "table", "media", "layout"],
-                "usage": "Use short names like 'edit' or full public names like 'word_v2_edit'.",
+                "usage": "Use short names like 'edit' or full public names like 'word_edit'.",
             })
         result = _load_result(raw)
         results.append({"index": i, "tool": tool, "requested_tool": requested_tool, "result": result})
@@ -2101,7 +2102,7 @@ async def word_v2_mutations(
     return _dump({"success": True, "session_id": session_id, "results": results})
 
 
-async def word_v2_layout(
+async def word_layout(
     session_id: str,
     action: str,
     page_size: str = "letter",
@@ -2183,7 +2184,7 @@ async def word_v2_layout(
 
 
 async def _paragraph_count(session_id: str) -> int | None:
-    result = _load_result(await word_v2_get_content(session_id=session_id, action="info"))
+    result = _load_result(await word_get_content(session_id=session_id, action="info"))
     if result.get("error"):
         return None
     value = result.get("paragraphs")
@@ -2347,7 +2348,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
     if block_type == "title_page":
         title = block.get("title") or block.get("text") or ""
         if title:
-            raw = await word_v2_edit(
+            raw = await word_edit(
                 session_id=session_id,
                 action="insert_paragraphs",
                 paragraphs=[str(title)],
@@ -2365,7 +2366,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
             path = image.get("path") or image.get("asset_path")
             if not path:
                 continue
-            image_raw = await word_v2_media(
+            image_raw = await word_media(
                 session_id=session_id,
                 action="insert_image",
                 path=path,
@@ -2390,7 +2391,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
 
         break_result = None
         if block.get("page_break_after", True):
-            break_result = _load_result(await word_v2_layout(
+            break_result = _load_result(await word_layout(
                 session_id=session_id,
                 action="page_break",
                 position="end",
@@ -2422,7 +2423,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
     if block_type == "paragraph":
         style = block.get("style") or "Normal"
         before = await _paragraph_count(session_id)
-        raw = await word_v2_edit(
+        raw = await word_edit(
             session_id=session_id,
             action="insert_paragraphs",
             paragraphs=[str(block.get("text") or "")],
@@ -2440,7 +2441,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
                 str(block.get("text") or ""),
                 fallback=fallback_index,
             )
-            format_result = _load_result(await word_v2_format(
+            format_result = _load_result(await word_format(
                 session_id=session_id,
                 action="list",
                 start_paragraph=target_paragraph,
@@ -2453,10 +2454,10 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
 
     if block_type == "heading":
         if block.get("page_break_before"):
-            await word_v2_layout(session_id=session_id, action="page_break", position="end")
+            await word_layout(session_id=session_id, action="page_break", position="end")
         level = int(block.get("level") or 1)
         style = block.get("style") or f"Heading {level}"
-        raw = await word_v2_edit(
+        raw = await word_edit(
             session_id=session_id,
             action="insert_paragraphs",
             paragraphs=[str(block.get("text") or "")],
@@ -2468,7 +2469,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
     if block_type == "list":
         items = [str(item) for item in block.get("items") or []]
         before = await _paragraph_count(session_id)
-        raw = await word_v2_edit(
+        raw = await word_edit(
             session_id=session_id,
             action="insert_paragraphs",
             paragraphs=items,
@@ -2480,7 +2481,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
         format_result = None
         if before is not None and after is not None and after >= before + len(items):
             list_type = "number" if block.get("ordered") else "bullet"
-            format_result = _load_result(await word_v2_format(
+            format_result = _load_result(await word_format(
                 session_id=session_id,
                 action="list",
                 start_paragraph=before + 1,
@@ -2494,7 +2495,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
         rows = block.get("rows") or block.get("data") or []
         row_count = len(rows)
         col_count = max(len(row) for row in rows) if rows else 0
-        raw = await word_v2_table(
+        raw = await word_table(
             session_id=session_id,
             action="create",
             rows=row_count,
@@ -2507,7 +2508,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
         return {"block_type": block_type, "result": _load_result(raw)}
 
     if block_type == "image":
-        raw = await word_v2_media(
+        raw = await word_media(
             session_id=session_id,
             action="insert_image",
             path=block.get("path"),
@@ -2533,7 +2534,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
 
     if block_type == "image_placeholder":
         label = block.get("label") or block.get("asset_id") or "image"
-        raw = await word_v2_edit(
+        raw = await word_edit(
             session_id=session_id,
             action="insert_paragraphs",
             paragraphs=[f"[Image placeholder: {label}]"],
@@ -2543,11 +2544,11 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
         return {
             "block_type": block_type,
             "result": _load_result(raw),
-            "warning": "image_placeholder creates editable placeholder text; use an image block or word_v2_media for real images.",
+            "warning": "image_placeholder creates editable placeholder text; use an image block or word_media for real images.",
         }
 
     if block_type == "page_break":
-        raw = await word_v2_layout(
+        raw = await word_layout(
             session_id=session_id,
             action="page_break",
             position=block.get("position") or "end",
@@ -2556,7 +2557,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
         return {"block_type": block_type, "result": _load_result(raw)}
 
     if block_type == "section_break":
-        raw = await word_v2_layout(
+        raw = await word_layout(
             session_id=session_id,
             action="section_break",
             position=block.get("position") or "end",
@@ -2568,7 +2569,7 @@ async def _apply_blueprint_block(session_id: str, block: dict[str, Any]) -> dict
     return {"block_type": block_type, "result": {"error": f"Unsupported block type: {block_type}"}}
 
 
-async def word_v2_blueprint(
+async def word_blueprint(
     action: str,
     session_id: str = None,
     blueprint: dict = None,
@@ -2601,7 +2602,7 @@ async def word_v2_blueprint(
             "expected": _blueprint_expected_counts(blueprint),
         }
         if session_id:
-            info = _load_result(await word_v2_get_content(session_id=session_id, action="info"))
+            info = _load_result(await word_get_content(session_id=session_id, action="info"))
             result["current"] = {
                 "paragraphs": info.get("paragraphs"),
                 "tables": info.get("tables"),
@@ -2622,14 +2623,14 @@ async def word_v2_blueprint(
         return _dump({"success": False, "errors": errors})
 
     normalized = _normalize_blueprint(blueprint)
-    created = _load_result(await word_v2_open(action="new", visible=visible))
+    created = _load_result(await word_open(action="new", visible=visible))
     if created.get("error"):
         return _dump(created)
     new_session_id = created["session_id"]
 
     page_setup = normalized.get("page_setup") or {}
     if page_setup:
-        await word_v2_layout(
+        await word_layout(
             session_id=new_session_id,
             action="page_setup",
             page_size=page_setup.get("size") or "letter",
@@ -2641,7 +2642,7 @@ async def word_v2_blueprint(
 
     properties = normalized.get("properties") or {}
     if properties:
-        await word_v2_layout(
+        await word_layout(
             session_id=new_session_id,
             action="properties",
             title=properties.get("title"),
@@ -2684,7 +2685,7 @@ async def word_v2_blueprint(
 
     save_result = None
     if out:
-        save_result = _load_result(await word_v2_save(session_id=new_session_id, out=out))
+        save_result = _load_result(await word_save(session_id=new_session_id, out=out))
 
     if new_session_id in _sessions:
         _sessions[new_session_id]["blueprint"] = normalized
@@ -2699,7 +2700,7 @@ async def word_v2_blueprint(
     })
 
 
-async def word_v2_protection(
+async def word_protection(
     session_id: str,
     action: str,
     protection_type: str = "read_only",

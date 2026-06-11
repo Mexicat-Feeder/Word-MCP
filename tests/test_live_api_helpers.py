@@ -2,76 +2,76 @@ import pytest
 import json
 import asyncio
 
-from word_document_server.tools import live_v2_tools
+from word_document_server.tools import live_api_tools
 
 
 def setup_function():
-    live_v2_tools._sessions.clear()
-    live_v2_tools._handles.clear()
+    live_api_tools._sessions.clear()
+    live_api_tools._handles.clear()
 
 
 def test_register_session_and_resolve_filename():
-    session_id = live_v2_tools._register_session({
+    session_id = live_api_tools._register_session({
         "document": "Contract.docx",
         "full_path": r"C:\Docs\Contract.docx",
     })
 
     assert session_id.startswith("word_")
-    assert live_v2_tools._resolve_filename(session_id=session_id) == r"C:\Docs\Contract.docx"
-    assert live_v2_tools._resolve_filename(session_id=session_id, filename="Other.docx") == "Other.docx"
+    assert live_api_tools._resolve_filename(session_id=session_id) == r"C:\Docs\Contract.docx"
+    assert live_api_tools._resolve_filename(session_id=session_id, filename="Other.docx") == "Other.docx"
 
 
 def test_resolve_filename_falls_back_to_document_name_for_unsaved_sessions():
-    session_id = live_v2_tools._register_session({
+    session_id = live_api_tools._register_session({
         "document": "Document1",
         "full_path": "",
     })
 
-    assert live_v2_tools._resolve_filename(session_id=session_id) == "Document1"
+    assert live_api_tools._resolve_filename(session_id=session_id) == "Document1"
 
 
 def test_close_save_flag_accepts_no_without_prompting():
-    assert live_v2_tools.live_tools._word_close_save_flag("no") == 0
-    assert live_v2_tools.live_tools._word_close_save_flag("discard") == 0
-    assert live_v2_tools.live_tools._word_close_save_flag("save") == -2
-    assert live_v2_tools.live_tools._word_close_save_flag("prompt") == -1
+    assert live_api_tools.live_tools._word_close_save_flag("no") == 0
+    assert live_api_tools.live_tools._word_close_save_flag("discard") == 0
+    assert live_api_tools.live_tools._word_close_save_flag("save") == -2
+    assert live_api_tools.live_tools._word_close_save_flag("prompt") == -1
 
     with pytest.raises(ValueError, match="Unknown save_changes"):
-        live_v2_tools.live_tools._word_close_save_flag("maybe")
+        live_api_tools.live_tools._word_close_save_flag("maybe")
 
 
 def test_store_handle_creates_selection_target():
-    session_id = live_v2_tools._register_session({"document": "Contract.docx"})
+    session_id = live_api_tools._register_session({"document": "Contract.docx"})
     match = {"start": 10, "end": 18, "text": "ACME Corp", "context": "Hello ACME Corp"}
 
-    enriched = live_v2_tools._store_handle(session_id, match, 0)
+    enriched = live_api_tools._store_handle(session_id, match, 0)
 
     assert enriched["handle"] == "match_1"
     assert enriched["target"] == {"kind": "selection", "start": 10, "end": 18}
-    assert live_v2_tools._resolve_target(session_id=session_id, handle="match_1") == enriched["target"]
+    assert live_api_tools._resolve_target(session_id=session_id, handle="match_1") == enriched["target"]
 
 
 def test_resolve_target_validates_unknown_handle():
-    session_id = live_v2_tools._register_session({"document": "Contract.docx"})
+    session_id = live_api_tools._register_session({"document": "Contract.docx"})
 
     with pytest.raises(ValueError, match="Unknown handle"):
-        live_v2_tools._resolve_target(session_id=session_id, handle="match_404")
+        live_api_tools._resolve_target(session_id=session_id, handle="match_404")
 
 
 def test_target_range_requires_selection_start_and_end():
-    assert live_v2_tools._target_range({"kind": "selection", "start": "1", "end": "5"}) == (1, 5)
+    assert live_api_tools._target_range({"kind": "selection", "start": "1", "end": "5"}) == (1, 5)
 
     with pytest.raises(ValueError, match="target.kind"):
-        live_v2_tools._target_range({"kind": "block", "start": 1, "end": 5})
+        live_api_tools._target_range({"kind": "block", "start": 1, "end": 5})
 
     with pytest.raises(ValueError, match="requires start and end"):
-        live_v2_tools._target_range({"kind": "selection", "start": 1})
+        live_api_tools._target_range({"kind": "selection", "start": 1})
 
 
 def test_save_requires_output_path_for_unsaved_sessions():
-    session_id = live_v2_tools._register_session({"document": "Document1", "full_path": ""})
+    session_id = live_api_tools._register_session({"document": "Document1", "full_path": ""})
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_save(session_id)))
+    result = json.loads(asyncio.run(live_api_tools.word_save(session_id)))
 
     assert "unsaved document" in result["error"]
 
@@ -89,10 +89,10 @@ def test_open_without_path_creates_new_document(monkeypatch):
     def fake_apply_template(filename):
         return {"success": True, "template": "default_plain", "document": filename}
 
-    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_create_document", fake_create_document)
-    monkeypatch.setattr(live_v2_tools, "_apply_default_template_live", fake_apply_template)
+    monkeypatch.setattr(live_api_tools.live_tools, "word_live_create_document", fake_create_document)
+    monkeypatch.setattr(live_api_tools, "_apply_default_template_live", fake_apply_template)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_open()))
+    result = json.loads(asyncio.run(live_api_tools.word_open()))
 
     assert result["success"] is True
     assert result["document"] == "Document1"
@@ -114,19 +114,19 @@ def test_open_action_attach_without_path_attaches_active_document(monkeypatch):
             ],
         })
 
-    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_list_open", fake_list_open)
+    monkeypatch.setattr(live_api_tools.live_read_tools, "word_live_list_open", fake_list_open)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="attach")))
+    result = json.loads(asyncio.run(live_api_tools.word_open(action="attach")))
 
     assert result["success"] is True
     assert result["document"] == "Source.docx"
     assert result["full_path"] == r"C:\Docs\Source.docx"
     assert result["session_id"].startswith("word_")
-    assert live_v2_tools._resolve_filename(result["session_id"]) == r"C:\Docs\Source.docx"
+    assert live_api_tools._resolve_filename(result["session_id"]) == r"C:\Docs\Source.docx"
 
 
 def test_open_action_list_returns_documents_without_session(monkeypatch):
-    existing_session = live_v2_tools._register_session({
+    existing_session = live_api_tools._register_session({
         "document": "Existing.docx",
         "full_path": r"C:\Docs\Existing.docx",
     })
@@ -140,9 +140,9 @@ def test_open_action_list_returns_documents_without_session(monkeypatch):
             ],
         })
 
-    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_list_open", fake_list_open)
+    monkeypatch.setattr(live_api_tools.live_read_tools, "word_live_list_open", fake_list_open)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="list")))
+    result = json.loads(asyncio.run(live_api_tools.word_open(action="list")))
 
     assert result["success"] is True
     assert result["count"] == 1
@@ -150,19 +150,19 @@ def test_open_action_list_returns_documents_without_session(monkeypatch):
     assert result["session_count"] == 1
     assert result["sessions"][0]["session_id"] == existing_session
     assert "session_id" not in result
-    assert "word_v2_open(action='attach')" in result["usage"]
+    assert "word_open(action='attach')" in result["usage"]
 
 
 def test_open_action_sessions_returns_registered_sessions():
-    session_id = live_v2_tools._register_session({
+    session_id = live_api_tools._register_session({
         "document": "Source.docx",
         "full_path": r"C:\Docs\Source.docx",
     })
-    live_v2_tools._handles[session_id]["match_1"] = {
+    live_api_tools._handles[session_id]["match_1"] = {
         "target": {"kind": "selection", "start": 1, "end": 5}
     }
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="sessions")))
+    result = json.loads(asyncio.run(live_api_tools.word_open(action="sessions")))
 
     assert result["success"] is True
     assert result["count"] == 1
@@ -183,13 +183,13 @@ def test_open_action_attach_uses_listed_document_identity(monkeypatch):
             ],
         })
 
-    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_list_open", fake_list_open)
+    monkeypatch.setattr(live_api_tools.live_read_tools, "word_live_list_open", fake_list_open)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="attach", path="1")))
+    result = json.loads(asyncio.run(live_api_tools.word_open(action="attach", path="1")))
 
     assert result["success"] is True
     assert result["document"] == "Background.docx"
-    assert live_v2_tools._sessions[result["session_id"]]["full_path"] == r"C:\Docs\Background.docx"
+    assert live_api_tools._sessions[result["session_id"]]["full_path"] == r"C:\Docs\Background.docx"
 
 
 def test_open_action_new_explicitly_creates_blank_document(monkeypatch):
@@ -205,10 +205,10 @@ def test_open_action_new_explicitly_creates_blank_document(monkeypatch):
     def fake_apply_template(filename):
         return {"success": True, "template": "default_plain", "document": filename}
 
-    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_create_document", fake_create_document)
-    monkeypatch.setattr(live_v2_tools, "_apply_default_template_live", fake_apply_template)
+    monkeypatch.setattr(live_api_tools.live_tools, "word_live_create_document", fake_create_document)
+    monkeypatch.setattr(live_api_tools, "_apply_default_template_live", fake_apply_template)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="new", visible=False)))
+    result = json.loads(asyncio.run(live_api_tools.word_open(action="new", visible=False)))
 
     assert result["success"] is True
     assert result["document"] == "Document1"
@@ -218,7 +218,7 @@ def test_open_action_new_explicitly_creates_blank_document(monkeypatch):
 
 
 def test_get_content_snapshot_and_diff_delegate_to_live_read_tools(monkeypatch):
-    session_id = live_v2_tools._register_session({
+    session_id = live_api_tools._register_session({
         "document": "Source.docx",
         "full_path": r"C:\Docs\Source.docx",
     })
@@ -232,11 +232,11 @@ def test_get_content_snapshot_and_diff_delegate_to_live_read_tools(monkeypatch):
         calls.append(("diff", filename))
         return json.dumps({"success": True, "changes": [{"paragraph_index": 1}]})
 
-    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_take_snapshot", fake_snapshot)
-    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_get_diff", fake_diff)
+    monkeypatch.setattr(live_api_tools.live_read_tools, "word_live_take_snapshot", fake_snapshot)
+    monkeypatch.setattr(live_api_tools.live_read_tools, "word_live_get_diff", fake_diff)
 
-    snapshot = json.loads(asyncio.run(live_v2_tools.word_v2_get_content(session_id, action="snapshot")))
-    diff = json.loads(asyncio.run(live_v2_tools.word_v2_get_content(session_id, action="diff")))
+    snapshot = json.loads(asyncio.run(live_api_tools.word_get_content(session_id, action="snapshot")))
+    diff = json.loads(asyncio.run(live_api_tools.word_get_content(session_id, action="diff")))
 
     assert snapshot["success"] is True
     assert snapshot["session_id"] == session_id
@@ -248,22 +248,22 @@ def test_get_content_snapshot_and_diff_delegate_to_live_read_tools(monkeypatch):
 
 
 def test_search_rejects_overlong_find_text_with_actionable_usage():
-    session_id = live_v2_tools._register_session({"document": "Source.docx"})
+    session_id = live_api_tools._register_session({"document": "Source.docx"})
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_search(
+    result = json.loads(asyncio.run(live_api_tools.word_search(
         session_id=session_id,
         find_text="x" * 256,
     )))
 
     assert "Word Find limit" in result["error"]
-    assert "word_v2_search" in result["alternatives"][0]
+    assert "word_search" in result["alternatives"][0]
     assert "paragraph_index" in result["usage"]
 
 
 def test_replace_with_overlong_find_text_returns_actionable_usage():
-    session_id = live_v2_tools._register_session({"document": "Source.docx"})
+    session_id = live_api_tools._register_session({"document": "Source.docx"})
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_edit(
+    result = json.loads(asyncio.run(live_api_tools.word_edit(
         session_id=session_id,
         action="replace",
         find_text="x" * 256,
@@ -275,7 +275,7 @@ def test_replace_with_overlong_find_text_returns_actionable_usage():
 
 
 def test_replace_can_target_one_based_paragraph_index(monkeypatch):
-    session_id = live_v2_tools._register_session({
+    session_id = live_api_tools._register_session({
         "document": "Source.docx",
         "full_path": r"C:\Docs\Source.docx",
     })
@@ -293,11 +293,11 @@ def test_replace_can_target_one_based_paragraph_index(monkeypatch):
         calls.append(("insert", filename, text, position, bookmark, track_changes))
         return json.dumps({"success": True, "inserted_text": text})
 
-    monkeypatch.setattr(live_v2_tools, "_resolve_paragraph_target", fake_resolve_paragraph_target)
-    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_delete_text", fake_delete)
-    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_insert_text", fake_insert)
+    monkeypatch.setattr(live_api_tools, "_resolve_paragraph_target", fake_resolve_paragraph_target)
+    monkeypatch.setattr(live_api_tools.live_tools, "word_live_delete_text", fake_delete)
+    monkeypatch.setattr(live_api_tools.live_tools, "word_live_insert_text", fake_insert)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_edit(
+    result = json.loads(asyncio.run(live_api_tools.word_edit(
         session_id=session_id,
         action="replace",
         paragraph_index=3,
@@ -313,8 +313,8 @@ def test_replace_can_target_one_based_paragraph_index(monkeypatch):
     ]
 
 
-def test_insert_paragraphs_uses_one_based_v2_paragraph_index(monkeypatch):
-    session_id = live_v2_tools._register_session({
+def test_insert_paragraphs_uses_one_based_paragraph_index(monkeypatch):
+    session_id = live_api_tools._register_session({
         "document": "Source.docx",
         "full_path": r"C:\Docs\Source.docx",
     })
@@ -324,9 +324,9 @@ def test_insert_paragraphs_uses_one_based_v2_paragraph_index(monkeypatch):
         calls.append((filename, paragraphs, target_text, target_paragraph_index, position, style, track_changes))
         return json.dumps({"success": True, "inserted_count": len(paragraphs)})
 
-    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_insert_paragraphs", fake_insert_paragraphs)
+    monkeypatch.setattr(live_api_tools.live_tools, "word_live_insert_paragraphs", fake_insert_paragraphs)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_edit(
+    result = json.loads(asyncio.run(live_api_tools.word_edit(
         session_id=session_id,
         action="insert_paragraphs",
         paragraphs=["Inserted"],
@@ -343,14 +343,14 @@ def test_insert_paragraphs_uses_one_based_v2_paragraph_index(monkeypatch):
 
 
 def test_comment_create_without_target_returns_usage_before_live_call(monkeypatch):
-    session_id = live_v2_tools._register_session({"document": "Source.docx"})
+    session_id = live_api_tools._register_session({"document": "Source.docx"})
 
     async def fail_add_comment(*_args, **_kwargs):
-        raise AssertionError("word_v2_comment should validate missing targets before calling live add_comment")
+        raise AssertionError("word_comment should validate missing targets before calling live add_comment")
 
-    monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_add_comment", fail_add_comment)
+    monkeypatch.setattr(live_api_tools.live_read_tools, "word_live_add_comment", fail_add_comment)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_comment(
+    result = json.loads(asyncio.run(live_api_tools.word_comment(
         session_id=session_id,
         action="create",
         text="Needs clarification.",
@@ -361,7 +361,7 @@ def test_comment_create_without_target_returns_usage_before_live_call(monkeypatc
 
 
 def test_blueprint_validation_rejects_unknown_blocks_and_bad_tables():
-    errors = live_v2_tools._validate_blueprint({
+    errors = live_api_tools._validate_blueprint({
         "blocks": [
             {"type": "callout", "text": "Nope"},
             {"type": "table", "rows": [["A"], ["B", "C"]]},
@@ -373,7 +373,7 @@ def test_blueprint_validation_rejects_unknown_blocks_and_bad_tables():
 
 
 def test_normalize_page_setup_accepts_custom_reference_size():
-    normalized = live_v2_tools._normalize_page_setup({
+    normalized = live_api_tools._normalize_page_setup({
         "size": "custom",
         "width": 612,
         "height": 792,
@@ -386,7 +386,7 @@ def test_normalize_page_setup_accepts_custom_reference_size():
 
 
 def test_blueprint_expected_counts():
-    counts = live_v2_tools._blueprint_expected_counts({
+    counts = live_api_tools._blueprint_expected_counts({
         "blocks": [
             {"type": "title_page", "title": "Cover"},
             {"type": "toc", "levels": 3},
@@ -414,7 +414,7 @@ def test_natural_sort_orders_numbered_asset_names(tmp_path):
     for name in names:
         (tmp_path / name).write_text("x", encoding="utf-8")
 
-    assert [path.split("\\")[-1].split("/")[-1] for path in live_v2_tools._asset_paths(str(tmp_path))] == [
+    assert [path.split("\\")[-1].split("/")[-1] for path in live_api_tools._asset_paths(str(tmp_path))] == [
         "pic 1.png",
         "pic 2.png",
         "pic 10.png",
@@ -422,9 +422,9 @@ def test_natural_sort_orders_numbered_asset_names(tmp_path):
 
 
 def test_page_role_classifies_title_toc_and_body_pages():
-    assert live_v2_tools._page_role(1, 3, {2}) == "title_page"
-    assert live_v2_tools._page_role(2, 3, {2}) == "toc"
-    assert live_v2_tools._page_role(3, 3, {2}) == "body"
+    assert live_api_tools._page_role(1, 3, {2}) == "title_page"
+    assert live_api_tools._page_role(2, 3, {2}) == "toc"
+    assert live_api_tools._page_role(3, 3, {2}) == "body"
 
 
 def test_asset_mapping_skips_title_page_images():
@@ -434,7 +434,7 @@ def test_asset_mapping_skips_title_page_images():
         {"image_index": 3, "page": 3, "range_start": 30},
     ]
 
-    warnings = live_v2_tools._map_assets_to_body_images(
+    warnings = live_api_tools._map_assets_to_body_images(
         images,
         [r"C:\Assets\pic 1.png", r"C:\Assets\pic 2.png"],
         first_body_page=3,
@@ -448,7 +448,7 @@ def test_asset_mapping_skips_title_page_images():
 
 
 def test_split_asset_paths_separates_and_orders_title_assets():
-    title_assets, body_assets = live_v2_tools._split_asset_paths([
+    title_assets, body_assets = live_api_tools._split_asset_paths([
         r"C:\Assets\2.1 Initial Setup pic 1.png",
         r"C:\Assets\Title page pic 3.png",
         r"C:\Assets\Ttitle page pic 2 logo.png",
@@ -474,7 +474,7 @@ def test_title_asset_mapping_adds_paths_to_title_page_images():
         {"image_index": 3, "page": 3, "range_start": 30},
     ]
 
-    warnings = live_v2_tools._map_assets_to_title_images(
+    warnings = live_api_tools._map_assets_to_title_images(
         images,
         [r"C:\Assets\Title Page pic 1.png", r"C:\Assets\Title page pic 2.png"],
         first_body_page=3,
@@ -488,7 +488,7 @@ def test_title_asset_mapping_adds_paths_to_title_page_images():
 
 
 def test_picture_shapes_are_emitted_as_image_records():
-    images = live_v2_tools._picture_shapes_as_images([
+    images = live_api_tools._picture_shapes_as_images([
         {"shape_index": 1, "shape_type": 13, "page": 3, "width_pt": 396.0, "height_pt": 231.1, "wrap_type": 4},
         {"shape_index": 2, "shape_type": 17, "page": 1, "width_pt": 100.0, "height_pt": 50.0},
     ])
@@ -514,7 +514,7 @@ def test_picture_shapes_are_emitted_as_image_records():
 
 
 def test_picture_shapes_fall_back_to_name_when_type_is_unreadable():
-    images = live_v2_tools._picture_shapes_as_images([
+    images = live_api_tools._picture_shapes_as_images([
         {"shape_index": 1, "name": "Picture 9", "shape_type": None, "page": 3, "width_pt": 396.0, "height_pt": 231.1},
         {"shape_index": 2, "name": "Text Box 1", "shape_type": None, "page": 1, "width_pt": 100.0, "height_pt": 50.0},
     ])
@@ -553,7 +553,7 @@ def test_inline_image_inspection_tolerates_unreadable_title():
     class Doc:
         InlineShapes = Collection()
 
-    images = live_v2_tools._inspect_inline_images_live(Doc(), [(7, 40, 50)])
+    images = live_api_tools._inspect_inline_images_live(Doc(), [(7, 40, 50)])
 
     assert images == [{
         "type": "image",
@@ -605,7 +605,7 @@ def test_shape_inspection_tolerates_unreadable_type():
     class Doc:
         Shapes = Collection()
 
-    shapes = live_v2_tools._inspect_shapes_live(Doc(), [(7, 40, 50)])
+    shapes = live_api_tools._inspect_shapes_live(Doc(), [(7, 40, 50)])
 
     assert shapes == [{
         "type": "shape",
@@ -627,7 +627,7 @@ def test_shape_inspection_tolerates_unreadable_type():
 
 
 def test_blueprint_list_format_maps_inspected_numbering():
-    assert live_v2_tools._blueprint_list_format({
+    assert live_api_tools._blueprint_list_format({
         "kind": "word_list",
         "list_string": "3.",
         "list_value": 3,
@@ -637,7 +637,7 @@ def test_blueprint_list_format_maps_inspected_numbering():
         "level": 0,
         "continue_previous": True,
     }
-    assert live_v2_tools._blueprint_list_format({
+    assert live_api_tools._blueprint_list_format({
         "kind": "word_list",
         "list_string": "",
         "list_value": 1,
@@ -647,11 +647,11 @@ def test_blueprint_list_format_maps_inspected_numbering():
         "level": 1,
         "continue_previous": False,
     }
-    assert live_v2_tools._blueprint_list_format({"kind": "none"}) is None
+    assert live_api_tools._blueprint_list_format({"kind": "none"}) is None
 
 
 def test_inspected_pages_flatten_for_blueprint_create():
-    normalized = live_v2_tools._normalize_blueprint({
+    normalized = live_api_tools._normalize_blueprint({
         "document": {
             "pages": [
                 {"page": 1, "blocks": [{"type": "title_page", "title": "Cover"}]},
@@ -665,7 +665,7 @@ def test_inspected_pages_flatten_for_blueprint_create():
 
 
 def test_inspected_document_blocks_take_precedence_over_pages():
-    normalized = live_v2_tools._normalize_blueprint({
+    normalized = live_api_tools._normalize_blueprint({
         "document": {
             "blocks": [{"type": "heading", "text": "1. Overview", "level": 1}],
             "pages": [
@@ -678,7 +678,7 @@ def test_inspected_document_blocks_take_precedence_over_pages():
 
 
 def test_page_blueprint_image_blocks_use_anchor_paragraph_metadata():
-    pages, blocks, warnings = live_v2_tools._build_page_blueprint(
+    pages, blocks, warnings = live_api_tools._build_page_blueprint(
         paragraph_records=[
             {
                 "type": "heading",
@@ -717,24 +717,24 @@ def test_page_blueprint_image_blocks_use_anchor_paragraph_metadata():
 
 
 def test_layout_invalid_action_does_not_require_session():
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_layout(session_id="missing", action="bad")))
+    result = json.loads(asyncio.run(live_api_tools.word_layout(session_id="missing", action="bad")))
 
     assert result["error"] == "Invalid action"
     assert "page_setup" in result["valid_actions"]
 
 
 def test_table_delete_column_requires_col_before_live_call(monkeypatch):
-    session_id = live_v2_tools._register_session({
+    session_id = live_api_tools._register_session({
         "document": "Doc.docx",
         "full_path": r"C:\Docs\Doc.docx",
     })
 
     async def fail_modify_table(*_args, **_kwargs):
-        raise AssertionError("word_v2_table should validate delete_column col before COM call")
+        raise AssertionError("word_table should validate delete_column col before COM call")
 
-    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_modify_table", fail_modify_table)
+    monkeypatch.setattr(live_api_tools.live_tools, "word_live_modify_table", fail_modify_table)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_table(
+    result = json.loads(asyncio.run(live_api_tools.word_table(
         session_id=session_id,
         action="delete_column",
     )))
@@ -744,7 +744,7 @@ def test_table_delete_column_requires_col_before_live_call(monkeypatch):
 
 
 def test_layout_break_alias_inserts_page_break(monkeypatch):
-    session_id = live_v2_tools._register_session({
+    session_id = live_api_tools._register_session({
         "document": "Doc.docx",
         "full_path": r"C:\Docs\Doc.docx",
     })
@@ -754,9 +754,9 @@ def test_layout_break_alias_inserts_page_break(monkeypatch):
         calls.append((filename, break_kind, position, paragraph_index, break_type))
         return {"success": True, "break": break_kind}
 
-    monkeypatch.setattr(live_v2_tools, "_layout_insert_break_live", fake_insert_break)
+    monkeypatch.setattr(live_api_tools, "_layout_insert_break_live", fake_insert_break)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_layout(
+    result = json.loads(asyncio.run(live_api_tools.word_layout(
         session_id=session_id,
         action="break",
         break_type="page",
@@ -775,22 +775,22 @@ def test_mutations_accept_full_public_tool_names(monkeypatch):
         calls.append(kwargs)
         return json.dumps({"success": True, "session_id": kwargs["session_id"]})
 
-    monkeypatch.setattr(live_v2_tools, "word_v2_edit", fake_edit)
+    monkeypatch.setattr(live_api_tools, "word_edit", fake_edit)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_mutations(
+    result = json.loads(asyncio.run(live_api_tools.word_mutations(
         session_id="word_123",
         action="apply",
         operations=[
-            {"tool": "word_v2_edit", "action": "insert", "text": "Hello"},
-            {"tool": "mcp_word_word_v2_edit", "action": "insert", "text": "World"},
+            {"tool": "word_edit", "action": "insert", "text": "Hello"},
+            {"tool": "mcp_word_word_edit", "action": "insert", "text": "World"},
         ],
     )))
 
     assert result["success"] is True
     assert [entry["tool"] for entry in result["results"]] == ["edit", "edit"]
     assert [entry["requested_tool"] for entry in result["results"]] == [
-        "word_v2_edit",
-        "mcp_word_word_v2_edit",
+        "word_edit",
+        "mcp_word_word_edit",
     ]
     assert calls == [
         {"action": "insert", "text": "Hello", "session_id": "word_123"},
@@ -799,7 +799,7 @@ def test_mutations_accept_full_public_tool_names(monkeypatch):
 
 
 def test_media_insert_delegates_to_live_image_tool(monkeypatch):
-    session_id = live_v2_tools._register_session({
+    session_id = live_api_tools._register_session({
         "document": "Doc.docx",
         "full_path": r"C:\Docs\Doc.docx",
     })
@@ -809,9 +809,9 @@ def test_media_insert_delegates_to_live_image_tool(monkeypatch):
         calls.append(kwargs)
         return json.dumps({"success": True, "image": "screen.png"})
 
-    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_insert_image", fake_insert_image)
+    monkeypatch.setattr(live_api_tools.live_tools, "word_live_insert_image", fake_insert_image)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_media(
+    result = json.loads(asyncio.run(live_api_tools.word_media(
         session_id=session_id,
         action="insert_image",
         path=r"C:\Assets\screen.png",
@@ -850,7 +850,7 @@ def test_media_insert_delegates_to_live_image_tool(monkeypatch):
 
 
 def test_blueprint_validation_requires_image_path():
-    errors = live_v2_tools._validate_blueprint({
+    errors = live_api_tools._validate_blueprint({
         "blocks": [{"type": "image"}],
     })
 
@@ -880,11 +880,11 @@ def test_apply_blueprint_paragraph_replays_inspected_list_format(monkeypatch):
         ))
         return json.dumps({"success": True, "session_id": kwargs["session_id"]})
 
-    monkeypatch.setattr(live_v2_tools, "word_v2_edit", fake_edit)
-    monkeypatch.setattr(live_v2_tools, "word_v2_get_content", fake_get_content)
-    monkeypatch.setattr(live_v2_tools, "word_v2_format", fake_format)
+    monkeypatch.setattr(live_api_tools, "word_edit", fake_edit)
+    monkeypatch.setattr(live_api_tools, "word_get_content", fake_get_content)
+    monkeypatch.setattr(live_api_tools, "word_format", fake_format)
 
-    result = asyncio.run(live_v2_tools._apply_blueprint_block("word_123", {
+    result = asyncio.run(live_api_tools._apply_blueprint_block("word_123", {
         "type": "paragraph",
         "text": "Second item",
         "style": "List Paragraph",
@@ -919,11 +919,11 @@ def test_apply_title_page_replays_simple_shapes(monkeypatch):
         calls.append(("shape", session_id, shape["name"], shape.get("text")))
         return {"success": True, "name": shape["name"]}
 
-    monkeypatch.setattr(live_v2_tools, "word_v2_edit", fake_edit)
-    monkeypatch.setattr(live_v2_tools, "word_v2_layout", fake_layout)
-    monkeypatch.setattr(live_v2_tools, "_insert_title_shape_live", fake_insert_shape)
+    monkeypatch.setattr(live_api_tools, "word_edit", fake_edit)
+    monkeypatch.setattr(live_api_tools, "word_layout", fake_layout)
+    monkeypatch.setattr(live_api_tools, "_insert_title_shape_live", fake_insert_shape)
 
-    result = asyncio.run(live_v2_tools._apply_blueprint_block("word_123", {
+    result = asyncio.run(live_api_tools._apply_blueprint_block("word_123", {
         "type": "title_page",
         "text": "",
         "page_break_after": True,
@@ -950,7 +950,7 @@ def test_blueprint_create_dispatches_blocks_in_order(monkeypatch):
 
     async def fake_open(action="open", visible=True, **_kwargs):
         calls.append(("open", action, visible))
-        session_id = live_v2_tools._register_session({
+        session_id = live_api_tools._register_session({
             "document": "Document1",
             "full_path": "",
             "template": "default_plain",
@@ -987,14 +987,14 @@ def test_blueprint_create_dispatches_blocks_in_order(monkeypatch):
     async def fake_get_content(session_id, action="info", **_kwargs):
         return json.dumps({"success": True, "session_id": session_id, "paragraphs": 10, "tables": 1})
 
-    monkeypatch.setattr(live_v2_tools, "word_v2_open", fake_open)
-    monkeypatch.setattr(live_v2_tools, "word_v2_layout", fake_layout)
-    monkeypatch.setattr(live_v2_tools, "word_v2_edit", fake_edit)
-    monkeypatch.setattr(live_v2_tools, "word_v2_table", fake_table)
-    monkeypatch.setattr(live_v2_tools, "word_v2_media", fake_media)
-    monkeypatch.setattr(live_v2_tools, "word_v2_get_content", fake_get_content)
+    monkeypatch.setattr(live_api_tools, "word_open", fake_open)
+    monkeypatch.setattr(live_api_tools, "word_layout", fake_layout)
+    monkeypatch.setattr(live_api_tools, "word_edit", fake_edit)
+    monkeypatch.setattr(live_api_tools, "word_table", fake_table)
+    monkeypatch.setattr(live_api_tools, "word_media", fake_media)
+    monkeypatch.setattr(live_api_tools, "word_get_content", fake_get_content)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_blueprint(
+    result = json.loads(asyncio.run(live_api_tools.word_blueprint(
         action="create",
         blueprint={
             "page_setup": {"size": "letter", "orientation": "portrait"},

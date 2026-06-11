@@ -3,25 +3,25 @@ from pathlib import Path
 
 
 ASYNC_TOOL_MODULES = {
-    "live_v2_tools",
+    "live_api_tools",
 }
 
 EXPECTED_PUBLIC_TOOLS = {
-    "word_v2_open",
-    "word_v2_save",
-    "word_v2_close",
-    "word_v2_get_content",
-    "word_v2_search",
-    "word_v2_edit",
-    "word_v2_format",
-    "word_v2_comment",
-    "word_v2_track_changes",
-    "word_v2_table",
-    "word_v2_media",
-    "word_v2_mutations",
-    "word_v2_layout",
-    "word_v2_blueprint",
-    "word_v2_protection",
+    "word_open",
+    "word_save",
+    "word_close",
+    "word_get_content",
+    "word_search",
+    "word_edit",
+    "word_format",
+    "word_comment",
+    "word_track_changes",
+    "word_table",
+    "word_media",
+    "word_mutations",
+    "word_layout",
+    "word_blueprint",
+    "word_protection",
 }
 
 
@@ -62,7 +62,7 @@ def test_registered_word_tools_are_async_wrappers():
     assert not sync_tools, f"Registered wrappers must be async: {sync_tools}"
 
 
-def test_public_tool_surface_is_v2_only():
+def test_public_tool_surface_is_grouped_only():
     tool_names = {node.name for node in _decorated_word_tools()}
 
     assert tool_names == EXPECTED_PUBLIC_TOOLS

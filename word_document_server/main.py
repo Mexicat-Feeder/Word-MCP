@@ -1,6 +1,6 @@
 """Entry point for the live-only Word MCP server.
 
-The public MCP surface intentionally exposes only the grouped ``word_v2_*``
+The public MCP surface intentionally exposes only the grouped ``word_*``
 tools. Lower-level ``word_live_*`` helpers still exist under
 ``word_document_server.tools`` as implementation details, but they are not
 registered as public MCP tools.
@@ -16,7 +16,7 @@ from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from word_document_server.defaults import DEFAULT_AUTHOR
-from word_document_server.tools import live_v2_tools
+from word_document_server.tools import live_api_tools
 
 
 print("Loading configuration from .env file...", file=sys.stderr)
@@ -48,11 +48,11 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Open",
+            title="Word Open",
             destructiveHint=False,
         ),
     )
-    async def word_v2_open(
+    async def word_open(
         path: str = None,
         directory: str = ".",
         visible: bool = True,
@@ -61,7 +61,7 @@ def register_tools() -> None:
         action: str = "open",
     ):
         """Open a file or create a new visible document; use action='attach' for already-open documents."""
-        return await live_v2_tools.word_v2_open(
+        return await live_api_tools.word_open(
             path=path,
             directory=directory,
             visible=visible,
@@ -72,31 +72,31 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Save",
+            title="Word Save",
             destructiveHint=True,
         ),
     )
-    async def word_v2_save(session_id: str, out: str = None):
+    async def word_save(session_id: str, out: str = None):
         """Save a live Word session in place, to a new path, or as PDF."""
-        return await live_v2_tools.word_v2_save(session_id=session_id, out=out)
+        return await live_api_tools.word_save(session_id=session_id, out=out)
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Close",
+            title="Word Close",
             destructiveHint=True,
         ),
     )
-    async def word_v2_close(session_id: str, save_changes: str = "save"):
+    async def word_close(session_id: str, save_changes: str = "save"):
         """Close a live Word session."""
-        return await live_v2_tools.word_v2_close(session_id=session_id, save_changes=save_changes)
+        return await live_api_tools.word_close(session_id=session_id, save_changes=save_changes)
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Get Content",
+            title="Word Get Content",
             readOnlyHint=True,
         ),
     )
-    async def word_v2_get_content(
+    async def word_get_content(
         session_id: str,
         action: str = "text",
         page: int = 1,
@@ -106,7 +106,7 @@ def register_tools() -> None:
         include_runs: bool = False,
     ):
         """Read text, page text, info, comments, revisions, paragraph formatting, snapshots, or diffs."""
-        return await live_v2_tools.word_v2_get_content(
+        return await live_api_tools.word_get_content(
             session_id=session_id,
             action=action,
             page=page,
@@ -118,11 +118,11 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Search",
+            title="Word Search",
             readOnlyHint=True,
         ),
     )
-    async def word_v2_search(
+    async def word_search(
         session_id: str,
         find_text: str,
         match_case: bool = False,
@@ -132,7 +132,7 @@ def register_tools() -> None:
         max_results: int = 100,
     ):
         """Search text and return reusable match handles."""
-        return await live_v2_tools.word_v2_search(
+        return await live_api_tools.word_search(
             session_id=session_id,
             find_text=find_text,
             match_case=match_case,
@@ -144,11 +144,11 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Edit",
+            title="Word Edit",
             destructiveHint=True,
         ),
     )
-    async def word_v2_edit(
+    async def word_edit(
         session_id: str,
         action: str,
         text: str = "",
@@ -172,7 +172,7 @@ def register_tools() -> None:
         footnote_index: int = None,
     ):
         """Edit live text. Actions: insert, replace, delete, insert_paragraphs, undo, add_hyperlink, add_footnote, delete_footnote."""
-        return await live_v2_tools.word_v2_edit(
+        return await live_api_tools.word_edit(
             session_id=session_id,
             action=action,
             text=text,
@@ -198,11 +198,11 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Format",
+            title="Word Format",
             destructiveHint=True,
         ),
     )
-    async def word_v2_format(
+    async def word_format(
         session_id: str,
         action: str = "inline",
         handle: str = None,
@@ -230,7 +230,7 @@ def register_tools() -> None:
         track_changes: bool = False,
     ):
         """Format text, paragraphs, styles, or lists."""
-        return await live_v2_tools.word_v2_format(
+        return await live_api_tools.word_format(
             session_id=session_id,
             action=action,
             handle=handle,
@@ -260,11 +260,11 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Comment",
+            title="Word Comment",
             destructiveHint=True,
         ),
     )
-    async def word_v2_comment(
+    async def word_comment(
         session_id: str,
         action: str,
         comment_id: int = None,
@@ -278,7 +278,7 @@ def register_tools() -> None:
         resolve: bool = True,
     ):
         """Create, reply to, resolve, delete, list, or get comments."""
-        return await live_v2_tools.word_v2_comment(
+        return await live_api_tools.word_comment(
             session_id=session_id,
             action=action,
             comment_id=comment_id,
@@ -294,11 +294,11 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Track Changes",
+            title="Word Track Changes",
             destructiveHint=True,
         ),
     )
-    async def word_v2_track_changes(
+    async def word_track_changes(
         session_id: str,
         action: str,
         enable: bool = None,
@@ -307,7 +307,7 @@ def register_tools() -> None:
         decision: str = "accept",
     ):
         """Toggle, list, accept, reject, or decide tracked changes."""
-        return await live_v2_tools.word_v2_track_changes(
+        return await live_api_tools.word_track_changes(
             session_id=session_id,
             action=action,
             enable=enable,
@@ -318,11 +318,11 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Table",
+            title="Word Table",
             destructiveHint=True,
         ),
     )
-    async def word_v2_table(
+    async def word_table(
         session_id: str,
         action: str,
         table_index: int = 1,
@@ -349,7 +349,7 @@ def register_tools() -> None:
         track_changes: bool = False,
     ):
         """Create, inspect, edit, or format tables."""
-        return await live_v2_tools.word_v2_table(
+        return await live_api_tools.word_table(
             session_id=session_id,
             action=action,
             table_index=table_index,
@@ -378,11 +378,11 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Media",
+            title="Word Media",
             destructiveHint=True,
         ),
     )
-    async def word_v2_media(
+    async def word_media(
         session_id: str,
         action: str,
         path: str,
@@ -405,7 +405,7 @@ def register_tools() -> None:
         relative_vertical_position: int = None,
     ):
         """Insert media into a live session."""
-        return await live_v2_tools.word_v2_media(
+        return await live_api_tools.word_media(
             session_id=session_id,
             action=action,
             path=path,
@@ -430,17 +430,17 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Mutations",
+            title="Word Mutations",
             readOnlyHint=False,
         ),
     )
-    async def word_v2_mutations(
+    async def word_mutations(
         session_id: str,
         action: str,
         operations: list[dict] = None,
     ):
-        """Preview or apply multiple v2 operations in order."""
-        return await live_v2_tools.word_v2_mutations(
+        """Preview or apply multiple operations in order."""
+        return await live_api_tools.word_mutations(
             session_id=session_id,
             action=action,
             operations=operations,
@@ -448,11 +448,11 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Layout",
+            title="Word Layout",
             destructiveHint=True,
         ),
     )
-    async def word_v2_layout(
+    async def word_layout(
         session_id: str,
         action: str,
         page_size: str = "letter",
@@ -474,7 +474,7 @@ def register_tools() -> None:
         last_author: str = None,
     ):
         """Manage page setup, breaks, and document properties."""
-        return await live_v2_tools.word_v2_layout(
+        return await live_api_tools.word_layout(
             session_id=session_id,
             action=action,
             page_size=page_size,
@@ -498,11 +498,11 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Blueprint",
+            title="Word Blueprint",
             destructiveHint=True,
         ),
     )
-    async def word_v2_blueprint(
+    async def word_blueprint(
         action: str,
         session_id: str = None,
         blueprint: dict = None,
@@ -511,7 +511,7 @@ def register_tools() -> None:
         asset_dir: str = None,
     ):
         """Create, inspect, validate, or export structured document blueprints."""
-        return await live_v2_tools.word_v2_blueprint(
+        return await live_api_tools.word_blueprint(
             action=action,
             session_id=session_id,
             blueprint=blueprint,
@@ -522,19 +522,19 @@ def register_tools() -> None:
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Word V2 Protection",
+            title="Word Protection",
             destructiveHint=True,
         ),
-        description=live_v2_tools.word_v2_protection.__doc__,
+        description=live_api_tools.word_protection.__doc__,
     )
-    async def word_v2_protection(
+    async def word_protection(
         session_id: str,
         action: str,
         protection_type: str = "read_only",
         password: str = None,
     ):
         """Protect or unprotect a live session."""
-        return await live_v2_tools.word_v2_protection(
+        return await live_api_tools.word_protection(
             session_id=session_id,
             action=action,
             protection_type=protection_type,

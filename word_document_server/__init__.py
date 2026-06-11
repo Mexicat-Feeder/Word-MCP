@@ -1,3 +1,3 @@
-"""Live Microsoft Word MCP server with a grouped word_v2 tool surface."""
+"""Live Microsoft Word MCP server with a grouped word tool surface."""
 
-__version__ = "1.6.2"
+__version__ = "1.7.0"

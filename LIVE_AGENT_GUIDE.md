@@ -1,6 +1,6 @@
-# Live V2 Agent Guide
+# Live Agent Guide
 
-The `word_v2_*` tools are the only public MCP interface for agents that edit
+The `word_*` tools are the only public MCP interface for agents that edit
 documents through Microsoft Word COM. They are intentionally grouped by intent
 so local models have fewer tool names to choose from.
 
@@ -9,44 +9,44 @@ implementation details, but they are not registered as MCP tools.
 
 ## Core Workflow
 
-1. `word_v2_open()` to create a new visible Word document,
-   `word_v2_open(path="contract.docx")` to open a file, or
-   `word_v2_open(action="attach")` to attach to the active Word document.
+1. `word_open()` to create a new visible Word document,
+   `word_open(path="contract.docx")` to open a file, or
+   `word_open(action="attach")` to attach to the active Word document.
 2. Keep the returned `session_id`.
-3. Read context with `word_v2_get_content(session_id, action="info")` or
-   `word_v2_get_content(session_id, action="text")`.
-4. Find edit targets with `word_v2_search(session_id, find_text="...")`.
+3. Read context with `word_get_content(session_id, action="info")` or
+   `word_get_content(session_id, action="text")`.
+4. Find edit targets with `word_search(session_id, find_text="...")`.
 5. Use returned `handle` values for edits, formatting, or comments.
-6. Validate with `word_v2_get_content` or `word_v2_search`.
-7. Save with `word_v2_save(session_id)`.
-8. Close with `word_v2_close(session_id, save_changes="save")`.
+6. Validate with `word_get_content` or `word_search`.
+7. Save with `word_save(session_id)`.
+8. Close with `word_close(session_id, save_changes="save")`.
 
 ## Tools
 
-### `word_v2_open`
+### `word_open`
 
 Lists, attaches, opens, or creates Word documents.
 
 Common calls:
 
-- `word_v2_open()` creates a new visible Word document and returns `session_id`.
-- `word_v2_open(action="list")` lists open Word documents and current MCP
+- `word_open()` creates a new visible Word document and returns `session_id`.
+- `word_open(action="list")` lists open Word documents and current MCP
   sessions without creating a new session.
-- `word_v2_open(action="sessions")` lists current MCP `session_id` values when
+- `word_open(action="sessions")` lists current MCP `session_id` values when
   the agent lost track of them.
-- `word_v2_open(action="attach")` attaches to the active Word document.
-- `word_v2_open(action="attach", path="2")` attaches to a listed document by
+- `word_open(action="attach")` attaches to the active Word document.
+- `word_open(action="attach", path="2")` attaches to a listed document by
   `index`, `name`, or `full_path`.
-- `word_v2_open(path="contract.docx")` opens a file. Relative paths resolve
+- `word_open(path="contract.docx")` opens a file. Relative paths resolve
   from the server working directory or the provided `directory`.
-- `word_v2_open(action="new")` creates a new document from the built-in
+- `word_open(action="new")` creates a new document from the built-in
   `default_plain` template profile.
 
-Do not call `word_v2_open()` when you intend to attach to an already-open
+Do not call `word_open()` when you intend to attach to an already-open
 document. Use `action="attach"` so agents do not accidentally create a new
 blank document.
 
-### `word_v2_get_content`
+### `word_get_content`
 
 Reads from the open session.
 
@@ -61,7 +61,7 @@ Actions:
 - `snapshot`: stores a baseline for later diffing.
 - `diff`: returns paragraphs changed since the last snapshot.
 
-### `word_v2_search`
+### `word_search`
 
 Finds text and returns mutation-ready handles:
 
@@ -77,7 +77,7 @@ Finds text and returns mutation-ready handles:
 Prefer passing `handle` to later tools instead of manually copying `start` and
 `end`.
 
-### `word_v2_edit`
+### `word_edit`
 
 Actions:
 
@@ -90,18 +90,18 @@ Actions:
 For `insert_paragraphs`, `paragraphs` may be a list of strings or a list of
 objects such as `{ "text": "Heading", "style": "Heading 1" }`.
 
-Use `track_changes=true` for suggested edits. Public v2 `paragraph_index`
-values are 1-based, matching `word_v2_get_content` output.
+Use `track_changes=true` for suggested edits. Public `paragraph_index`
+values are 1-based, matching `word_get_content` output.
 
 For long grammar edits, avoid `find_text` strings over 255 characters because
 Word's native Find API rejects them. Use one of these patterns instead:
 
 - Search a short unique anchor, then edit the returned `handle`.
 - Replace a whole paragraph with
-  `word_v2_edit(action="replace", paragraph_index=3, text="...", track_changes=true)`.
-- Use `word_v2_get_content(action="page_text")` to get `start`/`end` offsets.
+  `word_edit(action="replace", paragraph_index=3, text="...", track_changes=true)`.
+- Use `word_get_content(action="page_text")` to get `start`/`end` offsets.
 
-### `word_v2_format`
+### `word_format`
 
 Actions:
 
@@ -110,9 +110,9 @@ Actions:
 - `style`: apply a Word style.
 - `list`: apply or remove list formatting over paragraph ranges.
 
-For text ranges, pass a `handle` from `word_v2_search`.
+For text ranges, pass a `handle` from `word_search`.
 
-### `word_v2_comment`
+### `word_comment`
 
 Actions:
 
@@ -125,7 +125,7 @@ Actions:
 
 Use `text` for comment bodies.
 
-### `word_v2_track_changes`
+### `word_track_changes`
 
 Actions:
 
@@ -138,7 +138,7 @@ Actions:
 Revision IDs are volatile. Call `list` immediately before accepting or
 rejecting specific IDs.
 
-### `word_v2_table`
+### `word_table`
 
 Actions:
 
@@ -151,7 +151,7 @@ Table row and column indexes follow the underlying live COM table tools:
 generally 1-based for live table modification.
 For `delete_column`, pass `col` with the 1-based column number.
 
-### `word_v2_media`
+### `word_media`
 
 Actions:
 
@@ -184,7 +184,7 @@ fields instead of simplifying them. Use `wrapping` or `wrap_type`, plus
 `left_pt: -999995.0` are valid Word positioning values and should be replayed
 as-is.
 
-### `word_v2_layout`
+### `word_layout`
 
 Actions:
 
@@ -198,7 +198,7 @@ Actions:
 
 Use this when document structure matters more than text edits alone.
 
-### `word_v2_blueprint`
+### `word_blueprint`
 
 Actions:
 
@@ -246,12 +246,12 @@ When replaying an inspected blueprint, keep paragraph `numbering` objects. The
 creator uses them to reapply Word list formatting to paragraphs that were real
 bullets or numbered list items in the reference.
 
-### `word_v2_mutations`
+### `word_mutations`
 
 Use `action="preview"` to inspect a batch shape without changing the document.
 Use `action="apply"` to execute operations in order.
 Operation `tool` may use short names (`edit`, `comment`, `layout`) or public
-tool names (`word_v2_edit`, `mcp_word_word_v2_edit`).
+tool names (`word_edit`, `mcp_word_word_edit`).
 
 Example:
 
@@ -266,8 +266,8 @@ Example:
 }
 ```
 
-For review workflows, call `word_v2_get_content` to take a snapshot before
-edits, apply a batch, then call `word_v2_get_content` again to inspect the
+For review workflows, call `word_get_content` to take a snapshot before
+edits, apply a batch, then call `word_get_content` again to inspect the
 diff:
 
 ```json
@@ -282,14 +282,14 @@ diff:
 
 - Always open or attach first and carry `session_id`.
 - If the user says a document is already open, start with
-  `word_v2_open(action="list")` and then `word_v2_open(action="attach", ...)`;
+  `word_open(action="list")` and then `word_open(action="attach", ...)`;
   do not create a blank document.
-- If the user asks for a new document, use `word_v2_open(action="new")` or
-  `word_v2_blueprint(action="create")`.
+- If the user asks for a new document, use `word_open(action="new")` or
+  `word_blueprint(action="create")`.
 - Search before editing unless the user gives exact `start/end`.
 - Prefer `handle` over offsets.
 - Re-search after edits because offsets can move.
-- Use `word_v2_mutations` for batches of edits/comments instead of one tool
+- Use `word_mutations` for batches of edits/comments instead of one tool
   call per change.
 - Use `track_changes=true` for user-reviewable edits.
 - Save only after validation.

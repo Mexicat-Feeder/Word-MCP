@@ -2,7 +2,7 @@
 
 When Word has a file open with an exclusive lock, python-docx's is_zipfile check
 silently fails (returns False) because open() raises PermissionError. This patch
-detects that scenario and gives a helpful error pointing to live v2 tools.
+detects that scenario and gives a helpful error pointing to live tools.
 """
 
 import os
@@ -33,7 +33,7 @@ def install_path_hook() -> None:
             except PermissionError:
                 raise PackageNotFoundError(
                     f"File locked (probably open in Word): '{pkg_file}'. "
-                    f"Use word_v2_open and the other word_v2_* tools for Word-open files."
+                    f"Use word_open and the other word_* tools for Word-open files."
                 )
         return _orig_new(cls, pkg_file, *args, **kwargs)
 

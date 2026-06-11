@@ -23,8 +23,8 @@ def reject_control_chars(label: str, text: str) -> None:
             "Cell separator (\\x07), bell, and other control bytes corrupt "
             "Word Find/Replace and have caused full-document data loss. "
             "If you are trying to remove orphan cell separators left by a "
-            "prior delete_table, call word_v2_table with action='delete_table' "
-            "or inspect the document with word_v2_get_content. "
+            "prior delete_table, call word_table with action='delete_table' "
+            "or inspect the document with word_get_content. "
             "For paragraph marks / page breaks, use use_wildcards=True with "
             "^p / ^m."
         )
