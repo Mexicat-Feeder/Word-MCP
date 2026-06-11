@@ -83,7 +83,7 @@ Targets:
 
 | Target | Behavior |
 | --- | --- |
-| `hermes` | Generates Hermes config and runs `hermes mcp add word ...` when the CLI is on `PATH`. |
+| `hermes` | Generates Hermes config and runs `hermes mcp add word ...` when the CLI is on `PATH`. CLI registration uses `.venv\Scripts\word_mcp_server.exe` so Hermes does not need to parse `python -m ...` arguments, then accepts the prompt to enable all discovered tools. |
 | `openclaw` | Generates OpenClaw config and runs `openclaw mcp set word ...`, then `openclaw mcp doctor word --probe` unless `-SkipProbe` is passed. |
 | `custom` | Only writes and prints the config object. |
 

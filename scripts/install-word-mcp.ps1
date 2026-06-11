@@ -202,6 +202,18 @@ function Get-ProjectPythonPath {
     return (Join-Path $RepoRoot ".venv/bin/python")
 }
 
+function Get-ProjectScriptPath {
+    param(
+        [string]$RepoRoot,
+        [string]$ScriptName
+    )
+
+    if ($IsWindows -or $env:OS -eq "Windows_NT") {
+        return (Join-Path $RepoRoot ".venv\Scripts\$ScriptName.exe")
+    }
+    return (Join-Path $RepoRoot ".venv/bin/$ScriptName")
+}
+
 function Get-McpUrl {
     param(
         [string]$Transport,
@@ -293,14 +305,20 @@ function New-OpenClawMcpConfig {
 function Invoke-ClientCli {
     param(
         [string]$Executable,
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [string]$InputText = ""
     )
 
     Write-Host "> $Executable $($Arguments -join ' ')" -ForegroundColor DarkGray
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $output = & $Executable @Arguments 2>&1
+        if ($InputText) {
+            $output = $InputText | & $Executable @Arguments 2>&1
+        }
+        else {
+            $output = & $Executable @Arguments 2>&1
+        }
         $exitCode = $LASTEXITCODE
     }
     finally {
@@ -319,14 +337,14 @@ function Write-HermesManualCommand {
     param(
         [string]$ServerName,
         [string]$RepoRoot,
-        [string]$PythonPath,
+        [string]$CommandPath,
         [string]$Transport,
         [string]$Url
     )
 
     Write-Host "Manual Hermes command:" -ForegroundColor Yellow
     if ($Transport -eq "stdio") {
-        Write-Host "hermes mcp add $ServerName --command `"$PythonPath`" --args=-m word_document_server.main --env MCP_TRANSPORT=stdio PYTHONPATH=`"$RepoRoot`""
+        Write-Host "hermes mcp add $ServerName --command `"$CommandPath`" --env MCP_TRANSPORT=stdio PYTHONPATH=`"$RepoRoot`""
     }
     else {
         Write-Host "hermes mcp add $ServerName --url `"$Url`""
@@ -337,7 +355,7 @@ function Register-HermesMcp {
     param(
         [string]$ServerName,
         [string]$RepoRoot,
-        [string]$PythonPath,
+        [string]$CommandPath,
         [string]$Transport,
         [string]$Url
     )
@@ -345,7 +363,7 @@ function Register-HermesMcp {
     $hermes = Get-Command hermes -ErrorAction SilentlyContinue
     if (-not $hermes) {
         Write-Warning "Hermes CLI was not found on PATH. The config was still written."
-        Write-HermesManualCommand -ServerName $ServerName -RepoRoot $RepoRoot -PythonPath $PythonPath -Transport $Transport -Url $Url
+        Write-HermesManualCommand -ServerName $ServerName -RepoRoot $RepoRoot -CommandPath $CommandPath -Transport $Transport -Url $Url
         return
     }
 
@@ -356,9 +374,7 @@ function Register-HermesMcp {
             "add",
             $ServerName,
             "--command",
-            $PythonPath,
-            "--args=-m",
-            "word_document_server.main",
+            $CommandPath,
             "--env",
             "MCP_TRANSPORT=stdio",
             "PYTHONPATH=$RepoRoot"
@@ -375,11 +391,11 @@ function Register-HermesMcp {
     }
 
     try {
-        Invoke-ClientCli -Executable $hermes.Source -Arguments $arguments
+        Invoke-ClientCli -Executable $hermes.Source -Arguments $arguments -InputText "Y"
     }
     catch {
         Write-Warning "Hermes registration failed: $_"
-        Write-HermesManualCommand -ServerName $ServerName -RepoRoot $RepoRoot -PythonPath $PythonPath -Transport $Transport -Url $Url
+        Write-HermesManualCommand -ServerName $ServerName -RepoRoot $RepoRoot -CommandPath $CommandPath -Transport $Transport -Url $Url
     }
 }
 
@@ -473,6 +489,10 @@ $pythonPath = Get-ProjectPythonPath -RepoRoot $repoRoot
 if (-not (Test-Path -LiteralPath $pythonPath)) {
     throw "Expected project Python was not found at $pythonPath after uv sync."
 }
+$wordMcpCommandPath = Get-ProjectScriptPath -RepoRoot $repoRoot -ScriptName "word_mcp_server"
+if (-not (Test-Path -LiteralPath $wordMcpCommandPath)) {
+    throw "Expected console script was not found at $wordMcpCommandPath after uv sync."
+}
 
 Ensure-DefaultEnvFile `
     -RepoRoot $repoRoot `
@@ -536,7 +556,7 @@ elseif ($installTarget -eq "hermes") {
     Register-HermesMcp `
         -ServerName $ServerName `
         -RepoRoot $repoRoot `
-        -PythonPath $pythonPath `
+        -CommandPath $wordMcpCommandPath `
         -Transport $Transport `
         -Url (Get-McpUrl -Transport $Transport -HostAddress $HostAddress -Port $Port -McpPath $McpPath -SsePath $SsePath)
 }
