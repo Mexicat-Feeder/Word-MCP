@@ -9,8 +9,9 @@ implementation details, but they are not registered as MCP tools.
 
 ## Core Workflow
 
-1. `word_v2_open()` to attach to the active Word document, or
-   `word_v2_open(path="contract.docx")` to open a file.
+1. `word_v2_open()` to create a new visible Word document,
+   `word_v2_open(path="contract.docx")` to open a file, or
+   `word_v2_open(action="attach")` to attach to the active Word document.
 2. Keep the returned `session_id`.
 3. Read context with `word_v2_get_content(session_id, action="info")` or
    `word_v2_get_content(session_id, action="text")`.
@@ -28,11 +29,12 @@ Lists, attaches, opens, or creates Word documents.
 
 Common calls:
 
-- `word_v2_open()` attaches to the active Word document and returns `session_id`.
+- `word_v2_open()` creates a new visible Word document and returns `session_id`.
 - `word_v2_open(action="list")` lists open Word documents and current MCP
   sessions without creating a new session.
 - `word_v2_open(action="sessions")` lists current MCP `session_id` values when
   the agent lost track of them.
+- `word_v2_open(action="attach")` attaches to the active Word document.
 - `word_v2_open(action="attach", path="2")` attaches to a listed document by
   `index`, `name`, or `full_path`.
 - `word_v2_open(path="contract.docx")` opens a file. Relative paths resolve
@@ -40,8 +42,9 @@ Common calls:
 - `word_v2_open(action="new")` creates a new document from the built-in
   `default_plain` template profile.
 
-Do not call `word_v2_open()` when you intend to create a new document. Use
-`action="new"` so agents do not accidentally ignore a user's active document.
+Do not call `word_v2_open()` when you intend to attach to an already-open
+document. Use `action="attach"` so agents do not accidentally create a new
+blank document.
 
 ### `word_v2_get_content`
 
@@ -278,8 +281,9 @@ diff:
 ## Agent Rules
 
 - Always open or attach first and carry `session_id`.
-- If the user says a document is already open, start with `word_v2_open()` or
-  `word_v2_open(action="list")`; do not create a blank document.
+- If the user says a document is already open, start with
+  `word_v2_open(action="list")` and then `word_v2_open(action="attach", ...)`;
+  do not create a blank document.
 - If the user asks for a new document, use `word_v2_open(action="new")` or
   `word_v2_blueprint(action="create")`.
 - Search before editing unless the user gives exact `start/end`.

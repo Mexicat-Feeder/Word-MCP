@@ -60,7 +60,7 @@ def register_tools() -> None:
         password: str | None = None,
         action: str = "open",
     ):
-        """Open, attach to, list, list sessions, or create Word documents in live mode."""
+        """Open a file or create a new visible document; use action='attach' for already-open documents."""
         return await live_v2_tools.word_v2_open(
             path=path,
             directory=directory,

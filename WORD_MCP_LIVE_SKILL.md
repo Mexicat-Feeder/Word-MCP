@@ -93,6 +93,9 @@ toolset problem and ask for the session to be restarted with the `word` toolset.
   save, close, or recreate `.docx` files.
 - Always open, attach, or list first with the Word open/list tool; carry the
   returned `session_id`.
+- Calling the open tool with empty arguments creates a new visible Word
+  document. To use a document that is already open, call with `{"action":"list"}`
+  first and then `{"action":"attach", "path":"<index|name|full_path>"}`.
 - Inspect before structural edits on existing documents.
 - Re-inspect after edits or blueprint creation before final save.
 - Use handles returned by `mcp_word_word_v2_search` for targeted edits,
@@ -136,13 +139,13 @@ Then attach by index, name, or full path with `mcp_word_word_v2_open`:
 If the user gives a file path, call `mcp_word_word_v2_open` with:
 
 ```json
-{"path": "C:\\Docs\\Example.docx", "read_only": false, "visible": false}
+{"path": "C:\\Docs\\Example.docx", "read_only": false, "visible": true}
 ```
 
-For a new document, call `mcp_word_word_v2_open` with:
+For a new document, call `mcp_word_word_v2_open` with empty arguments or:
 
 ```json
-{"action": "new", "visible": false}
+{"action": "new", "visible": true}
 ```
 
 ## Simple Edit With Tracked Changes And Comments
@@ -243,7 +246,7 @@ Use the returned `session_blueprint.document` as the source for creation:
   "action": "create",
   "blueprint": {"document": "...preserved inspected document object..."},
   "out": "C:\\Docs\\generated.docx",
-  "visible": false
+  "visible": true
 }
 ```
 

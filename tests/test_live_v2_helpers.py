@@ -76,7 +76,34 @@ def test_save_requires_output_path_for_unsaved_sessions():
     assert "unsaved document" in result["error"]
 
 
-def test_open_without_path_attaches_active_document(monkeypatch):
+def test_open_without_path_creates_new_document(monkeypatch):
+    async def fake_create_document(visible=True):
+        return json.dumps({
+            "success": True,
+            "document": "Document1",
+            "full_path": "",
+            "message": "New blank document 'Document1' created successfully in live session",
+            "visible": visible,
+        })
+
+    def fake_apply_template(filename):
+        return {"success": True, "template": "default_plain", "document": filename}
+
+    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_create_document", fake_create_document)
+    monkeypatch.setattr(live_v2_tools, "_apply_default_template_live", fake_apply_template)
+
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_open()))
+
+    assert result["success"] is True
+    assert result["document"] == "Document1"
+    assert result["full_path"] == ""
+    assert result["visible"] is True
+    assert result["template"] == "default_plain"
+    assert "No path was provided" in result["message"]
+    assert result["session_id"].startswith("word_")
+
+
+def test_open_action_attach_without_path_attaches_active_document(monkeypatch):
     async def fake_list_open():
         return json.dumps({
             "success": True,
@@ -87,13 +114,9 @@ def test_open_without_path_attaches_active_document(monkeypatch):
             ],
         })
 
-    async def fail_create_document(**_kwargs):
-        raise AssertionError("word_v2_open() must not create a blank document when an active document exists")
-
     monkeypatch.setattr(live_v2_tools.live_read_tools, "word_live_list_open", fake_list_open)
-    monkeypatch.setattr(live_v2_tools.live_tools, "word_live_create_document", fail_create_document)
 
-    result = json.loads(asyncio.run(live_v2_tools.word_v2_open()))
+    result = json.loads(asyncio.run(live_v2_tools.word_v2_open(action="attach")))
 
     assert result["success"] is True
     assert result["document"] == "Source.docx"
@@ -127,7 +150,7 @@ def test_open_action_list_returns_documents_without_session(monkeypatch):
     assert result["session_count"] == 1
     assert result["sessions"][0]["session_id"] == existing_session
     assert "session_id" not in result
-    assert "word_v2_open()" in result["usage"]
+    assert "word_v2_open(action='attach')" in result["usage"]
 
 
 def test_open_action_sessions_returns_registered_sessions():

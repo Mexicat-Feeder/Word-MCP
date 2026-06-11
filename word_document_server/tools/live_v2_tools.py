@@ -1457,7 +1457,7 @@ async def word_v2_open(
     password: str | None = None,
     action: str = "open",
 ) -> str:
-    """Open, attach to, list, or create Word documents and return a v2 session when applicable."""
+    """Open a file or create a new visible document; use action='attach' for already-open documents."""
     action = (action or "open").lower().strip()
     path_alias = (path or "").lower().strip()
 
@@ -1467,7 +1467,8 @@ async def word_v2_open(
             result["session_count"] = len(_sessions)
             result["sessions"] = _session_records()
             result["usage"] = (
-                "Call word_v2_open() to attach to the active document, "
+                "Call word_v2_open() or word_v2_open(action='new') to create a new visible document, "
+                "word_v2_open(action='attach') to attach to the active document, "
                 "word_v2_open(action='attach', path='<name|full_path|index>') to attach a listed document, "
                 "word_v2_open(action='sessions') to list MCP session IDs, "
                 "or word_v2_open(path='<file.docx>') to open a file."
@@ -1482,14 +1483,20 @@ async def word_v2_open(
             "usage": "Use an existing session_id with word_v2_get_content, word_v2_search, word_v2_edit, word_v2_comment, word_v2_save, and word_v2_close.",
         })
 
-    if action in {"active", "attach"} or (action == "open" and path_alias in {"", "active", "current"}):
+    if action in {"active", "attach"} or (action == "open" and path_alias in {"active", "current"}):
         result = await _attach_open_document(None if path_alias in {"", "active", "current"} else path)
-    elif action == "new" or path_alias in {"new", "blank", "create", "create_new"}:
+    elif action == "new" or (action == "open" and path_alias in {"", "new", "blank", "create", "create_new"}):
         result = _load_result(await live_tools.word_live_create_document(visible=visible))
         if not result.get("error"):
             template_result = _apply_default_template_live(result.get("document"))
             result["template"] = DEFAULT_TEMPLATE_ID
             result["template_result"] = template_result
+            if action == "open" and not path_alias:
+                result["message"] = (
+                    f"{result.get('message', 'Created new document')} "
+                    "No path was provided, so word_v2_open created a new visible Word document. "
+                    "Use action='attach' to attach to an already-open document."
+                )
     elif action == "open":
         result = _load_result(await live_tools.word_live_open_document(
             filename=path,
