@@ -49,7 +49,7 @@ function Resolve-InstallTarget {
 
     Write-Step "Select MCP client target"
     Write-Host "1. hermes   - register with 'hermes mcp add' when available"
-    Write-Host "2. openclaw - register with 'openclaw mcp set' when available"
+    Write-Host "2. openclaw - native Windows CLI install only; Windows Hub install is not supported"
     Write-Host "3. custom   - write and print the MCP config only"
     $selection = Read-Host "Target (1-3, default: custom)"
 
@@ -213,6 +213,11 @@ function Get-ProjectScriptPath {
         return (Join-Path $RepoRoot ".venv\Scripts\$ScriptName.exe")
     }
     return (Join-Path $RepoRoot ".venv/bin/$ScriptName")
+}
+
+function Write-OpenClawCliRequirement {
+    Write-Host "OpenClaw target requires the native Windows OpenClaw CLI install with 'openclaw' on PATH." -ForegroundColor Yellow
+    Write-Host "The Windows Hub version is not supported by this installer path." -ForegroundColor Yellow
 }
 
 function Get-UserHomePath {
@@ -504,7 +509,7 @@ function Register-OpenClawMcp {
     $configJson = $Config | ConvertTo-Json -Depth 20 -Compress
     $openclaw = Get-Command openclaw -ErrorAction SilentlyContinue
     if (-not $openclaw) {
-        Write-Warning "OpenClaw CLI was not found on PATH. The config was still written."
+        Write-Warning "OpenClaw CLI was not found on PATH. Install the native Windows CLI version; the Windows Hub version is not supported by this installer path. The config was still written."
         Write-OpenClawManualCommand -ServerName $ServerName -ConfigJson $configJson -SkipProbe $SkipProbe
         return
     }
@@ -539,6 +544,9 @@ Write-Host "Requested Python: $requiredPython"
 Write-Host "MCP client target: $installTarget"
 Write-Host "MCP server name: $ServerName"
 Write-Host "Transport: $Transport"
+if ($installTarget -eq "openclaw") {
+    Write-OpenClawCliRequirement
+}
 
 $uvPath = Find-Uv
 if (-not $uvPath) {

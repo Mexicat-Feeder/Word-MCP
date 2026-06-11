@@ -41,6 +41,9 @@ For a specific client, skip the selector:
 Use `custom` if your MCP client does not have a supported CLI installer. The
 script will print the config object you can paste into your client.
 
+OpenClaw setup requires the native Windows OpenClaw CLI install with `openclaw`
+on `PATH`; the Windows Hub version is not supported by the installer.
+
 ## Useful Options
 
 ```powershell
